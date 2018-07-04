@@ -193,18 +193,26 @@ func doesPolicySignatureV4Match(formValues http.Header) APIErrorCode {
 	return ErrNone
 }
 
+// Backward compatible API
+func doesPresignedSignatureMatch(hashedPayload string, r *http.Request, region string) APIErrorCode {
+	cred := globalServerConfig.GetCredential()
+	verifier, err := NewAWSV4Verifier(cred.AccessKey, cred.SecretKey, region)
+	if err != nil {
+		return ErrNoSuchKey
+	}
+	return verifier.doesPresignedSignatureMatch(hashedPayload, r)
+}
+
 // doesPresignedSignatureMatch - Verify query headers with presigned signature
 //     - http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
 // returns ErrNone if the signature matches.
-func doesPresignedSignatureMatch(hashedPayload string, r *http.Request, region string) APIErrorCode {
-	// Access credentials.
-	cred := globalServerConfig.GetCredential()
-
+func (verifier AWSV4Verifier) doesPresignedSignatureMatch(hashedPayload string, r *http.Request) APIErrorCode {
+	cred := verifier.GetCredential()
 	// Copy request
 	req := *r
 
 	// Parse request query string.
-	pSignValues, err := parsePreSignV4(req.URL.Query(), region)
+	pSignValues, err := parsePreSignV4(req.URL.Query(), verifier.region)
 	if err != ErrNone {
 		return err
 	}
@@ -290,7 +298,7 @@ func doesPresignedSignatureMatch(hashedPayload string, r *http.Request, region s
 	presignedStringToSign := getStringToSign(presignedCanonicalReq, t, pSignValues.Credential.getScope())
 
 	// Get hmac presigned signing key.
-	presignedSigningKey := getSigningKey(cred.SecretKey, pSignValues.Credential.scope.date, pSignValues.Credential.scope.region)
+	presignedSigningKey := getSigningKey(verifier.creds.SecretKey, pSignValues.Credential.scope.date, pSignValues.Credential.scope.region)
 
 	// Get new signature.
 	newSignature := getSignature(presignedSigningKey, presignedStringToSign)
@@ -305,10 +313,7 @@ func doesPresignedSignatureMatch(hashedPayload string, r *http.Request, region s
 // doesSignatureMatch - Verify authorization header with calculated header in accordance with
 //     - http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
 // returns ErrNone if signature matches.
-func doesSignatureMatch(hashedPayload string, r *http.Request, region string) APIErrorCode {
-	// Access credentials.
-	cred := globalServerConfig.GetCredential()
-
+func (verifier AWSV4Verifier) doesSignatureMatch(hashedPayload string, r *http.Request) APIErrorCode {
 	// Copy request.
 	req := *r
 
@@ -316,7 +321,7 @@ func doesSignatureMatch(hashedPayload string, r *http.Request, region string) AP
 	v4Auth := req.Header.Get("Authorization")
 
 	// Parse signature version '4' header.
-	signV4Values, err := parseSignV4(v4Auth, region)
+	signV4Values, err := parseSignV4(v4Auth, verifier.region)
 	if err != ErrNone {
 		return err
 	}
@@ -328,7 +333,7 @@ func doesSignatureMatch(hashedPayload string, r *http.Request, region string) AP
 	}
 
 	// Verify if the access key id matches.
-	if signV4Values.Credential.accessKey != cred.AccessKey {
+	if signV4Values.Credential.accessKey != verifier.creds.AccessKey {
 		return ErrInvalidAccessKeyID
 	}
 
@@ -355,7 +360,7 @@ func doesSignatureMatch(hashedPayload string, r *http.Request, region string) AP
 	stringToSign := getStringToSign(canonicalRequest, t, signV4Values.Credential.getScope())
 
 	// Get hmac signing key.
-	signingKey := getSigningKey(cred.SecretKey, signV4Values.Credential.scope.date, signV4Values.Credential.scope.region)
+	signingKey := getSigningKey(verifier.creds.SecretKey, signV4Values.Credential.scope.date, signV4Values.Credential.scope.region)
 
 	// Calculate signature.
 	newSignature := getSignature(signingKey, stringToSign)

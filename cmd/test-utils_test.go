@@ -941,13 +941,12 @@ func newTestStreamingSignedRequest(method, urlStr string, contentLength, chunkSi
 
 // preSignV4 presign the request, in accordance with
 // http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html.
-func preSignV4(req *http.Request, accessKeyID, secretAccessKey string, expires int64) error {
+func preSignV4(req *http.Request, accessKeyID, secretAccessKey string, region string, expires int64) error {
 	// Presign is not needed for anonymous credentials.
 	if accessKeyID == "" || secretAccessKey == "" {
 		return errors.New("Presign cannot be generated without access and secret keys")
 	}
 
-	region := globalServerConfig.GetRegion()
 	date := UTCNow()
 	scope := getScope(date, region)
 	credential := fmt.Sprintf("%s/%s", accessKeyID, scope)

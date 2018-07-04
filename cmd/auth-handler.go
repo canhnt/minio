@@ -110,12 +110,22 @@ func getRequestAuthType(r *http.Request) authType {
 	return authTypeUnknown
 }
 
+// backward compatible function
+func checkAdminRequestAuthType(r *http.Request, region string) APIErrorCode {
+	cred := globalServerConfig.GetCredential()
+	verifier, err := NewAWSV4Verifier(cred.AccessKey, cred.SecretKey, globalServerConfig.GetRegion())
+	if err != nil {
+		return ErrNoSuchKey
+	}
+	return verifier.checkAdminRequestAuthType(r)
+}
+
 // checkAdminRequestAuthType checks whether the request is a valid signature V2 or V4 request.
 // It does not accept presigned or JWT or anonymous requests.
-func checkAdminRequestAuthType(r *http.Request, region string) APIErrorCode {
+func (verifier AWSV4Verifier) checkAdminRequestAuthType(r *http.Request) APIErrorCode {
 	s3Err := ErrAccessDenied
 	if _, ok := r.Header["X-Amz-Content-Sha256"]; ok && getRequestAuthType(r) == authTypeSigned && !skipContentSha256Cksum(r) { // we only support V4 (no presign) with auth. body
-		s3Err = isReqAuthenticated(r, region)
+		s3Err = verifier.isReqAuthenticated(r)
 	}
 	if s3Err != ErrNone {
 		reqInfo := (&logger.ReqInfo{}).AppendTags("requestHeaders", dumpRequest(r))
@@ -125,7 +135,17 @@ func checkAdminRequestAuthType(r *http.Request, region string) APIErrorCode {
 	return s3Err
 }
 
+// backward compatible function
 func checkRequestAuthType(ctx context.Context, r *http.Request, action policy.Action, bucketName, objectName string) APIErrorCode {
+	cred := globalServerConfig.GetCredential()
+	verifier, err := NewAWSV4Verifier(cred.AccessKey, cred.SecretKey, globalServerConfig.GetRegion())
+	if err != nil {
+		return ErrNoSuchKey
+	}
+	return verifier.checkRequestAuthType(ctx, r, action, bucketName, objectName)
+}
+
+func (verifier AWSV4Verifier) checkRequestAuthType(ctx context.Context, r *http.Request, action policy.Action, bucketName, objectName string) APIErrorCode {
 	isOwner := true
 	accountName := globalServerConfig.GetCredential().AccessKey
 
@@ -137,13 +157,13 @@ func checkRequestAuthType(ctx context.Context, r *http.Request, action policy.Ac
 			return errorCode
 		}
 	case authTypeSigned, authTypePresigned:
-		region := globalServerConfig.GetRegion()
-		switch action {
-		case policy.GetBucketLocationAction, policy.ListAllMyBucketsAction:
-			region = ""
-		}
+		// region := verifier.region
+		// switch action {
+		// case policy.GetBucketLocationAction, policy.ListAllMyBucketsAction:
+		// 	region = ""
+		// }
 
-		if errorCode := isReqAuthenticated(r, region); errorCode != ErrNone {
+		if errorCode := verifier.isReqAuthenticated(r); errorCode != ErrNone {
 			return errorCode
 		}
 	default:
@@ -196,21 +216,32 @@ func isReqAuthenticatedV2(r *http.Request) (s3Error APIErrorCode) {
 	return doesPresignV2SignatureMatch(r)
 }
 
+// backward compatible function
 func reqSignatureV4Verify(r *http.Request, region string) (s3Error APIErrorCode) {
+	cred := globalServerConfig.GetCredential()
+	verifier, err := NewAWSV4Verifier(cred.AccessKey, cred.SecretKey, globalServerConfig.GetRegion())
+	if err != nil {
+		return ErrNoSuchKey
+	}
+	return verifier.reqSignatureV4Verify(r)
+}
+
+
+func (verifier AWSV4Verifier) reqSignatureV4Verify(r *http.Request) (s3Error APIErrorCode) {
 	sha256sum := getContentSha256Cksum(r)
 	switch {
 	case isRequestSignatureV4(r):
-		return doesSignatureMatch(sha256sum, r, region)
+		return verifier.doesSignatureMatch(sha256sum, r)
 	case isRequestPresignedSignatureV4(r):
-		return doesPresignedSignatureMatch(sha256sum, r, region)
+		return verifier.doesPresignedSignatureMatch(sha256sum, r)
 	default:
 		return ErrAccessDenied
 	}
 }
 
 // Verify if request has valid AWS Signature Version '4'.
-func isReqAuthenticated(r *http.Request, region string) (s3Error APIErrorCode) {
-	if errCode := reqSignatureV4Verify(r, region); errCode != ErrNone {
+func (verifier AWSV4Verifier) isReqAuthenticated(r *http.Request) (s3Error APIErrorCode) {
+	if errCode := verifier.reqSignatureV4Verify(r); errCode != ErrNone {
 		return errCode
 	}
 

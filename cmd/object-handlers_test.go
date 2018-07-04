@@ -2810,7 +2810,7 @@ func testAPIPutObjectPartHandlerPreSign(obj ObjectLayer, instanceType, bucketNam
 		t.Fatalf("[%s] - Failed to create an unsigned request to put object part for %s/%s <ERROR> %v",
 			instanceType, bucketName, testObject, err)
 	}
-	err = preSignV4(req, credentials.AccessKey, credentials.SecretKey, int64(10*60*60))
+	err = preSignV4(req, credentials.AccessKey, credentials.SecretKey, globalServerConfig.GetRegion(), int64(10*60*60))
 	if err != nil {
 		t.Fatalf("[%s] - Failed to presign an unsigned request to put object part for %s/%s <ERROR> %v",
 			instanceType, bucketName, testObject, err)
@@ -3302,7 +3302,7 @@ func testAPIListObjectPartsHandlerPreSign(obj ObjectLayer, instanceType, bucketN
 			instanceType, bucketName, mpartResp.UploadID)
 	}
 
-	err = preSignV4(req, credentials.AccessKey, credentials.SecretKey, int64(10*60*60))
+	err = preSignV4(req, credentials.AccessKey, credentials.SecretKey, globalServerConfig.GetRegion(), int64(10*60*60))
 	if err != nil {
 		t.Fatalf("[%s] - Failed to presignV2 an unsigned request to list object parts for bucket %s, uploadId %s",
 			instanceType, bucketName, mpartResp.UploadID)
