@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"net/http"
-	"github.com/minio/minio/pkg/auth"
 	"fmt"
+	"net/http"
+
+	"github.com/minio/minio/pkg/auth"
 )
 
 // Decorator to expose AWS Signature V4 verification functions
@@ -19,7 +20,7 @@ func NewAWSV4Verifier(accessKey string, secretKey string, region string) (*AWSV4
 	}
 
 	return &AWSV4Verifier{
-		creds: creds,
+		creds:  creds,
 		region: region,
 	}, nil
 }
@@ -38,4 +39,18 @@ func (verifier AWSV4Verifier) CheckAdminRequestAuthType(r *http.Request) APIErro
 
 func (verifier AWSV4Verifier) GetRegion() string {
 	return verifier.region
+}
+
+// AccessKeyFromRequest returns the accessKey used in the request
+func AccessKeyFromRequest(req *http.Request, region string) (string, APIErrorCode) {
+	v4Auth := req.Header.Get("Authorization")
+
+	// Parse signature version '4' header.
+	signV4Values, errCode := parseSignV4(v4Auth, region)
+	if errCode != ErrNone {
+		return "", errCode
+	}
+
+	return signV4Values.Credential.accessKey, ErrNone
+
 }
