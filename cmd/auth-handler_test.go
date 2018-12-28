@@ -413,7 +413,7 @@ func TestCheckAdminRequestAuthType(t *testing.T) {
 	}
 	ctx := context.Background()
 	for i, testCase := range testCases {
-		if s3Error := verifier.checkAdminRequestAuthType(ctx, testCase.Request, globalServerConfig.GetRegion()); s3Error != testCase.ErrCode {
+		if s3Error := verifier.checkAdminRequestAuthType(ctx, testCase.Request, verifier.GetRegion()); s3Error != testCase.ErrCode {
 			t.Errorf("Test %d: Unexpected s3error returned wanted %d, got %d", i, testCase.ErrCode, s3Error)
 		}
 	}

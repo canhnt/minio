@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -29,12 +30,12 @@ func (verifier AWSV4Verifier) GetCredential() auth.Credentials {
 	return verifier.creds
 }
 
-func (verifier AWSV4Verifier) IsReqAuthenticated(r *http.Request) (s3Error APIErrorCode) {
-	return verifier.isReqAuthenticated(r)
+func (verifier AWSV4Verifier) IsReqAuthenticated(ctx context.Context, r *http.Request, region string) (s3Error APIErrorCode) {
+	return verifier.isReqAuthenticated(ctx, r, region)
 }
 
-func (verifier AWSV4Verifier) CheckAdminRequestAuthType(r *http.Request) APIErrorCode {
-	return verifier.checkAdminRequestAuthType(r)
+func (verifier AWSV4Verifier) CheckAdminRequestAuthType(ctx context.Context, r *http.Request, region string) APIErrorCode {
+	return verifier.checkAdminRequestAuthType(ctx, r, region)
 }
 
 func (verifier AWSV4Verifier) GetRegion() string {

@@ -212,11 +212,10 @@ func (verifier AWSV4Verifier) doesPresignedSignatureMatch(hashedPayload string, 
 	if err != ErrNone {
 		return err
 	}
-	cred := verifier.GetCredential()
 
-	// Verify if the access key id matches.
-	if pSignValues.Credential.accessKey != verifier.creds.AccessKey {
-		return ErrInvalidAccessKeyID
+	cred, _, s3Err := verifier.checkKeyValid(pSignValues.Credential.accessKey)
+	if s3Err != ErrNone {
+		return s3Err
 	}
 
 	// Extract all the signed headers along with its values.
@@ -336,8 +335,9 @@ func (verifier AWSV4Verifier) doesSignatureMatch(hashedPayload string, r *http.R
 		return errCode
 	}
 
-	if signV4Values.Credential.accessKey != verifier.creds.AccessKey {
-		return ErrInvalidAccessKeyID
+	_, _, s3Err := verifier.checkKeyValid(signV4Values.Credential.accessKey)
+	if s3Err != ErrNone {
+		return s3Err
 	}
 
 	// Extract date, if not present throw error.

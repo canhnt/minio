@@ -48,6 +48,15 @@ func (c credentialHeader) getScope() string {
 }
 
 func getReqAccessKeyV4(r *http.Request, region string) (auth.Credentials, bool, APIErrorCode) {
+	cred := globalServerConfig.GetCredential()
+	verifier, err := NewAWSV4Verifier(cred.AccessKey, cred.SecretKey, globalServerConfig.GetRegion())
+	if err != nil {
+		return cred, false, ErrNoSuchKey
+	}
+	return verifier.getReqAccessKeyV4(r, region)
+}
+
+func (verifier AWSV4Verifier) getReqAccessKeyV4(r *http.Request, region string) (auth.Credentials, bool, APIErrorCode) {
 	ch, err := parseCredentialHeader("Credential="+r.URL.Query().Get("X-Amz-Credential"), region)
 	if err != ErrNone {
 		// Strip off the Algorithm prefix.
@@ -61,7 +70,7 @@ func getReqAccessKeyV4(r *http.Request, region string) (auth.Credentials, bool, 
 			return auth.Credentials{}, false, err
 		}
 	}
-	return checkKeyValid(ch.accessKey)
+	return verifier.checkKeyValid(ch.accessKey)
 }
 
 // parse credentialHeader string into its structured form.

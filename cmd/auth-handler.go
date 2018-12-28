@@ -23,7 +23,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"github.com/canhnt/minio/pkg/iam/policy"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -137,7 +136,7 @@ func (verifier AWSV4Verifier) checkAdminRequestAuthType(ctx context.Context, r *
 		// We only support admin credentials to access admin APIs.
 
 		var owner bool
-		_, owner, s3Err = getReqAccessKeyV4(r, region)
+		_, owner, s3Err = verifier.getReqAccessKeyV4(r, region)
 		if s3Err != ErrNone {
 			return s3Err
 		}
@@ -262,7 +261,7 @@ func (verifier AWSV4Verifier) checkRequestAuthType(ctx context.Context, r *http.
 		case policy.GetBucketLocationAction, policy.ListAllMyBucketsAction:
 			region = ""
 		}
-		if s3Err = isReqAuthenticated(ctx, r, region); s3Err != ErrNone {
+		if s3Err = verifier.isReqAuthenticated(ctx, r, region); s3Err != ErrNone {
 			return s3Err
 		}
 		cred, owner, s3Err = getReqAccessKeyV4(r, region)
@@ -349,9 +348,9 @@ func (verifier AWSV4Verifier) reqSignatureV4Verify(r *http.Request, region strin
 	sha256sum := getContentSha256Cksum(r)
 	switch {
 	case isRequestSignatureV4(r):
-		return verifier.doesSignatureMatch(sha256sum, r)
+		return verifier.doesSignatureMatch(sha256sum, r, region)
 	case isRequestPresignedSignatureV4(r):
-		return verifier.doesPresignedSignatureMatch(sha256sum, r)
+		return verifier.doesPresignedSignatureMatch(sha256sum, r, region)
 	default:
 		return ErrAccessDenied
 	}
@@ -359,7 +358,7 @@ func (verifier AWSV4Verifier) reqSignatureV4Verify(r *http.Request, region strin
 
 // Verify if request has valid AWS Signature Version '4'.
 func (verifier AWSV4Verifier) isReqAuthenticated(ctx context.Context, r *http.Request, region string) (s3Error APIErrorCode) {
-	if errCode := reqSignatureV4Verify(r, region); errCode != ErrNone {
+	if errCode := verifier.reqSignatureV4Verify(r, region); errCode != ErrNone {
 		return errCode
 	}
 

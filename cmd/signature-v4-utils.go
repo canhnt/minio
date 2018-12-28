@@ -101,11 +101,21 @@ func isValidRegion(reqRegion string, confRegion string) bool {
 	return reqRegion == confRegion
 }
 
+// backward compatible
+func checkKeyValid(accessKey string) (auth.Credentials, bool, APIErrorCode) {
+	cred := globalServerConfig.GetCredential()
+	verifier, err := NewAWSV4Verifier(cred.AccessKey, cred.SecretKey, globalServerConfig.GetRegion())
+	if err != nil {
+		return cred, false, ErrNoSuchKey
+	}
+	return verifier.checkKeyValid(accessKey)
+}
+
 // check if the access key is valid and recognized, additionally
 // also returns if the access key is owner/admin.
-func checkKeyValid(accessKey string) (auth.Credentials, bool, APIErrorCode) {
+func (verifier AWSV4Verifier) checkKeyValid(accessKey string) (auth.Credentials, bool, APIErrorCode) {
 	var owner = true
-	var cred = globalServerConfig.GetCredential()
+	var cred = verifier.creds
 	if cred.AccessKey != accessKey {
 		if globalIAMSys == nil {
 			return cred, false, ErrInvalidAccessKeyID
