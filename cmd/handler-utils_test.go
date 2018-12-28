@@ -30,11 +30,14 @@ import (
 
 // Tests validate bucket LocationConstraint.
 func TestIsValidLocationContraint(t *testing.T) {
-	path, err := newTestConfig(globalMinioDefaultRegion)
+	obj, fsDir, err := prepareFS()
 	if err != nil {
-		t.Fatalf("unable initialize config file, %s", err)
+		t.Fatal(err)
 	}
-	defer os.RemoveAll(path)
+	defer os.RemoveAll(fsDir)
+	if err = newTestConfig(globalMinioDefaultRegion, obj); err != nil {
+		t.Fatal(err)
+	}
 
 	// Test with corrupted XML
 	malformedReq := &http.Request{
@@ -165,9 +168,19 @@ func TestExtractMetadataHeaders(t *testing.T) {
 				"x-amz-meta-appid": []string{"amz-meta"},
 			},
 			metadata: map[string]string{
-				"X-Amz-Meta-Appid": "amz-meta",
+				"x-amz-meta-appid": "amz-meta",
 			},
-			shouldFail: true,
+			shouldFail: false,
+		},
+		// Support multiple values
+		{
+			header: http.Header{
+				"x-amz-meta-key": []string{"amz-meta1", "amz-meta2"},
+			},
+			metadata: map[string]string{
+				"x-amz-meta-key": "amz-meta1,amz-meta2",
+			},
+			shouldFail: false,
 		},
 		// Empty header input returns empty metadata.
 		{
@@ -179,7 +192,8 @@ func TestExtractMetadataHeaders(t *testing.T) {
 
 	// Validate if the extracting headers.
 	for i, testCase := range testCases {
-		metadata, err := extractMetadataFromHeader(context.Background(), testCase.header)
+		metadata := make(map[string]string)
+		err := extractMetadataFromMap(context.Background(), testCase.header, metadata)
 		if err != nil && !testCase.shouldFail {
 			t.Fatalf("Test %d failed to extract metadata: %v", i+1, err)
 		}

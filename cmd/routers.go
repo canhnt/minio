@@ -36,7 +36,7 @@ func newCacheObjectsFn() CacheObjectLayer {
 // Composed function registering routers for only distributed XL setup.
 func registerDistXLRouters(router *mux.Router, endpoints EndpointList) {
 	// Register storage rpc router only if its a distributed setup.
-	registerStorageRPCRouters(router, endpoints)
+	registerStorageRESTHandlers(router, endpoints)
 
 	// Register distributed namespace lock.
 	registerDistNSLockRouter(router)
@@ -47,6 +47,8 @@ func registerDistXLRouters(router *mux.Router, endpoints EndpointList) {
 
 // List of some generic handlers which are applied for all incoming requests.
 var globalHandlers = []HandlerFunc{
+	// set x-amz-request-id, x-minio-deployment-id header.
+	addCustomHeaders,
 	// set HTTP security headers such as Content-Security-Policy.
 	addSecurityHeaders,
 	// Forward path style requests to actual host in a bucket federated setup.
@@ -80,6 +82,8 @@ var globalHandlers = []HandlerFunc{
 	// routes them accordingly. Client receives a HTTP error for
 	// invalid/unsupported signatures.
 	setAuthHandler,
+	// Enforce rules specific for TLS requests
+	setSSETLSHandler,
 	// filters HTTP headers which are treated as metadata and are reserved
 	// for internal use only.
 	filterReservedMetadata,
@@ -97,11 +101,14 @@ func configureServerHandler(endpoints EndpointList) (http.Handler, error) {
 		registerDistXLRouters(router, endpoints)
 	}
 
+	// Add STS router only enabled if etcd is configured.
+	registerSTSRouter(router)
+
 	// Add Admin RPC router
 	registerAdminRPCRouter(router)
 
-	// Add Admin router.
-	registerAdminRouter(router)
+	// Add Admin router, all APIs are enabled in server mode.
+	registerAdminRouter(router, true)
 
 	// Add healthcheck router
 	registerHealthCheckRouter(router)

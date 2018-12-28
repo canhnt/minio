@@ -18,23 +18,30 @@ package logger
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/hex"
 	"fmt"
 	"go/build"
-	"os"
+	"hash"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"time"
 
-	c "github.com/minio/mc/pkg/console"
-	"golang.org/x/crypto/ssh/terminal"
+	"github.com/minio/highwayhash"
+	"github.com/minio/minio-go/pkg/set"
+	"github.com/minio/minio/cmd/logger/message/log"
+)
+
+var (
+	// HighwayHash key for logging in anonymous mode
+	magicHighwayHash256Key = []byte("\x4b\xe7\x34\xfa\x8e\x23\x8a\xcd\x26\x3e\x83\xe6\xbb\x96\x85\x52\x04\x0f\x93\x5d\xa3\x9f\x44\x14\x97\xe0\x9d\x13\x22\xde\x36\xa0")
+	// HighwayHash hasher for logging in anonymous mode
+	loggerHighwayHasher hash.Hash
 )
 
 // Disable disables all logging, false by default. (used for "go test")
 var Disable = false
-
-var trimStrings []string
 
 // Level type
 type Level int8
@@ -46,7 +53,15 @@ const (
 	FatalLvl
 )
 
-const loggerTimeFormat string = "15:04:05 MST 01/02/2006"
+var trimStrings []string
+
+// TimeFormat - logging time format.
+const TimeFormat string = "15:04:05 MST 01/02/2006"
+
+// List of error strings to be ignored by LogIf
+const (
+	diskNotFoundError = "disk not found"
+)
 
 var matchingFuncNames = [...]string{
 	"http.HandlerFunc.ServeHTTP",
@@ -87,74 +102,56 @@ func (level Level) String() string {
 	return lvlStr
 }
 
-// Console interface describes the methods that needs to be implemented to satisfy the interface requirements.
-type Console interface {
-	json(msg string, args ...interface{})
-	quiet(msg string, args ...interface{})
-	pretty(msg string, args ...interface{})
-}
-
-func consoleLog(console Console, msg string, args ...interface{}) {
-	if jsonFlag {
-		// Strip escape control characters from json message
-		msg = ansiRE.ReplaceAllLiteralString(msg, "")
-		console.json(msg, args...)
-	} else if quiet {
-		console.quiet(msg, args...)
-	} else {
-		console.pretty(msg, args...)
-	}
-}
-
-type traceEntry struct {
-	Message   string            `json:"message,omitempty"`
-	Source    []string          `json:"source,omitempty"`
-	Variables map[string]string `json:"variables,omitempty"`
-}
-type args struct {
-	Bucket string `json:"bucket,omitempty"`
-	Object string `json:"object,omitempty"`
-}
-
-type api struct {
-	Name string `json:"name,omitempty"`
-	Args *args  `json:"args,omitempty"`
-}
-
-type logEntry struct {
-	Level      string      `json:"level"`
-	Time       string      `json:"time"`
-	API        *api        `json:"api,omitempty"`
-	RemoteHost string      `json:"remotehost,omitempty"`
-	RequestID  string      `json:"requestID,omitempty"`
-	UserAgent  string      `json:"userAgent,omitempty"`
-	Message    string      `json:"message,omitempty"`
-	Trace      *traceEntry `json:"error,omitempty"`
-}
-
-// quiet: Hide startup messages if enabled
+// quietFlag: Hide startup messages if enabled
 // jsonFlag: Display in JSON format, if enabled
 var (
-	quiet, jsonFlag bool
+	quietFlag, jsonFlag, anonFlag bool
 	// Custom function to format error
 	errorFmtFunc func(string, error, bool) string
 )
 
 // EnableQuiet - turns quiet option on.
 func EnableQuiet() {
-	quiet = true
+	quietFlag = true
 }
 
 // EnableJSON - outputs logs in json format.
 func EnableJSON() {
 	jsonFlag = true
-	quiet = true
+	quietFlag = true
+}
+
+// EnableAnonymous - turns anonymous flag
+// to avoid printing sensitive information.
+func EnableAnonymous() {
+	anonFlag = true
+}
+
+// IsJSON - returns true if jsonFlag is true
+func IsJSON() bool {
+	return jsonFlag
+}
+
+// IsQuiet - returns true if quietFlag is true
+func IsQuiet() bool {
+	return quietFlag
 }
 
 // RegisterUIError registers the specified rendering function. This latter
 // will be called for a pretty rendering of fatal errors.
 func RegisterUIError(f func(string, error, bool) string) {
 	errorFmtFunc = f
+}
+
+// Remove any duplicates and return unique entries.
+func uniqueEntries(paths []string) []string {
+	m := make(set.StringSet)
+	for _, p := range paths {
+		if !m.Contains(p) {
+			m.Add(p)
+		}
+	}
+	return m.ToSlice()
 }
 
 // Init sets the trimStrings to possible GOPATHs
@@ -207,6 +204,8 @@ func Init(goPath string, goRoot string) {
 	// paths like "{GOROOT}/src/github.com/minio/minio"
 	// and "{GOPATH}/src/github.com/minio/minio"
 	trimStrings = append(trimStrings, filepath.Join("github.com", "minio", "minio")+string(filepath.Separator))
+
+	loggerHighwayHasher, _ = highwayhash.New(magicHighwayHash256Key) // New will never return error since key is 256 bit
 }
 
 func trimTrace(f string) string {
@@ -259,14 +258,41 @@ func getTrace(traceLevel int) []string {
 	return trace
 }
 
-// LogIf prints a detailed error message during
+// Return the highway hash of the passed string
+func hashString(input string) string {
+	defer loggerHighwayHasher.Reset()
+	loggerHighwayHasher.Write([]byte(input))
+	checksum := loggerHighwayHasher.Sum(nil)
+	return hex.EncodeToString(checksum)
+}
+
+// LogAlwaysIf prints a detailed error message during
 // the execution of the server.
-func LogIf(ctx context.Context, err error) {
-	if Disable {
+func LogAlwaysIf(ctx context.Context, err error) {
+	if err == nil {
 		return
 	}
 
+	logIf(ctx, err)
+}
+
+// LogIf prints a detailed error message during
+// the execution of the server, if it is not an
+// ignored error.
+func LogIf(ctx context.Context, err error) {
 	if err == nil {
+		return
+	}
+
+	if err.Error() != diskNotFoundError {
+		logIf(ctx, err)
+	}
+}
+
+// logIf prints a detailed error message during
+// the execution of the server.
+func logIf(ctx context.Context, err error) {
+	if Disable {
 		return
 	}
 
@@ -287,79 +313,44 @@ func LogIf(ctx context.Context, err error) {
 	}
 
 	// Get full stack trace
-	trace := getTrace(2)
+	trace := getTrace(3)
 
 	// Get the cause for the Error
 	message := err.Error()
 
-	// Output the formatted log message at console
-	var output string
-	if jsonFlag {
-		logJSON, err := json.Marshal(&logEntry{
-			Level:      ErrorLvl.String(),
-			RemoteHost: req.RemoteHost,
-			RequestID:  req.RequestID,
-			UserAgent:  req.UserAgent,
-			Time:       time.Now().UTC().Format(time.RFC3339Nano),
-			API:        &api{Name: API, Args: &args{Bucket: req.BucketName, Object: req.ObjectName}},
-			Trace:      &traceEntry{Message: message, Source: trace, Variables: tags},
-		})
-		if err != nil {
-			panic(err)
-		}
-		output = string(logJSON)
-	} else {
-		// Add a sequence number and formatting for each stack trace
-		// No formatting is required for the first entry
-		for i, element := range trace {
-			trace[i] = fmt.Sprintf("%8v: %s", i+1, element)
-		}
-
-		tagString := ""
-		for key, value := range tags {
-			if value != "" {
-				if tagString != "" {
-					tagString += ", "
-				}
-				tagString += key + "=" + value
-			}
-		}
-
-		apiString := "API: " + API + "("
-		if req.BucketName != "" {
-			apiString = apiString + "bucket=" + req.BucketName
-		}
-		if req.ObjectName != "" {
-			apiString = apiString + ", object=" + req.ObjectName
-		}
-		apiString += ")"
-		timeString := "Time: " + time.Now().Format(loggerTimeFormat)
-
-		var requestID string
-		if req.RequestID != "" {
-			requestID = "\nRequestID: " + req.RequestID
-		}
-
-		var remoteHost string
-		if req.RemoteHost != "" {
-			remoteHost = "\nRemoteHost: " + req.RemoteHost
-		}
-
-		var userAgent string
-		if req.UserAgent != "" {
-			userAgent = "\nUserAgent: " + req.UserAgent
-		}
-
-		if len(tags) > 0 {
-			tagString = "\n       " + tagString
-		}
-
-		var msg = colorFgRed(colorBold(message))
-		output = fmt.Sprintf("\n%s\n%s%s%s%s\nError: %s%s\n%s",
-			apiString, timeString, requestID, remoteHost, userAgent,
-			msg, tagString, strings.Join(trace, "\n"))
+	entry := log.Entry{
+		DeploymentID: req.DeploymentID,
+		Level:        ErrorLvl.String(),
+		RemoteHost:   req.RemoteHost,
+		RequestID:    req.RequestID,
+		UserAgent:    req.UserAgent,
+		Time:         time.Now().UTC().Format(time.RFC3339Nano),
+		API: &log.API{
+			Name: API,
+			Args: &log.Args{
+				Bucket: req.BucketName,
+				Object: req.ObjectName,
+			},
+		},
+		Trace: &log.Trace{
+			Message:   message,
+			Source:    trace,
+			Variables: tags,
+		},
 	}
-	fmt.Println(output)
+
+	if anonFlag {
+		entry.API.Args.Bucket = hashString(entry.API.Args.Bucket)
+		entry.API.Args.Object = hashString(entry.API.Args.Object)
+		entry.RemoteHost = hashString(entry.RemoteHost)
+		entry.Message = reflect.TypeOf(err).String()
+		entry.Trace.Variables = make(map[string]string)
+	}
+
+	// Iterate over all logger targets to send the log entry
+	for _, t := range Targets {
+		t.Send(entry)
+	}
 }
 
 // ErrCritical is the value panic'd whenever CriticalIf is called.
@@ -380,156 +371,4 @@ func FatalIf(err error, msg string, data ...interface{}) {
 		return
 	}
 	fatal(err, msg, data...)
-}
-
-// Fatal prints only fatal error message without no stack trace
-// it will be called for input validation failures
-func Fatal(err error, msg string, data ...interface{}) {
-	fatal(err, msg, data...)
-}
-
-func fatal(err error, msg string, data ...interface{}) {
-	var errMsg string
-	if msg != "" {
-		errMsg = errorFmtFunc(fmt.Sprintf(msg, data...), err, jsonFlag)
-	} else {
-		errMsg = err.Error()
-	}
-	consoleLog(fatalMessage, errMsg)
-}
-
-var fatalMessage fatalMsg
-
-type fatalMsg struct {
-}
-
-func (f fatalMsg) json(msg string, args ...interface{}) {
-	logJSON, err := json.Marshal(&logEntry{
-		Level: FatalLvl.String(),
-		Time:  time.Now().UTC().Format(time.RFC3339Nano),
-		Trace: &traceEntry{Message: fmt.Sprintf(msg, args...), Source: []string{getSource(6)}},
-	})
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(string(logJSON))
-
-	os.Exit(1)
-
-}
-
-func (f fatalMsg) quiet(msg string, args ...interface{}) {
-	f.pretty(msg, args...)
-}
-
-var (
-	logTag       = "ERROR"
-	logBanner    = colorBgRed(colorFgWhite(colorBold(logTag))) + " "
-	emptyBanner  = colorBgRed(strings.Repeat(" ", len(logTag))) + " "
-	minimumWidth = 80
-	bannerWidth  = len(logTag) + 1
-)
-
-func (f fatalMsg) pretty(msg string, args ...interface{}) {
-	// Build the passed error message
-	errMsg := fmt.Sprintf(msg, args...)
-	// Check terminal width
-	termWidth, _, err := terminal.GetSize(0)
-	if err != nil || termWidth < minimumWidth {
-		termWidth = minimumWidth
-	}
-	// Calculate available widht without the banner
-	width := termWidth - bannerWidth
-
-	tagPrinted := false
-
-	// Print the error message: the following code takes care
-	// of splitting error text and always pretty printing the
-	// red banner along with the error message. Since the error
-	// message itself contains some colored text, we needed
-	// to use some ANSI control escapes to cursor color state
-	// and freely move in the screen.
-	for _, line := range strings.Split(errMsg, "\n") {
-		if len(line) == 0 {
-			// No more text to print, just quit.
-			break
-		}
-
-		for {
-			// Save the attributes of the current cursor helps
-			// us save the text color of the passed error message
-			ansiSaveAttributes()
-			// Print banner with or without the log tag
-			if !tagPrinted {
-				fmt.Print(logBanner)
-				tagPrinted = true
-			} else {
-				fmt.Print(emptyBanner)
-			}
-			// Restore the text color of the error message
-			ansiRestoreAttributes()
-			ansiMoveRight(bannerWidth)
-			// Continue  error message printing
-			if len(line) > width {
-				fmt.Println(line[:width])
-				line = line[width:]
-			} else {
-				fmt.Println(line)
-				break
-			}
-		}
-	}
-
-	// Exit because this is a fatal error message
-	os.Exit(1)
-}
-
-var info infoMsg
-
-type infoMsg struct {
-}
-
-func (i infoMsg) json(msg string, args ...interface{}) {
-	logJSON, err := json.Marshal(&logEntry{
-		Level:   InformationLvl.String(),
-		Message: fmt.Sprintf(msg, args...),
-		Time:    time.Now().UTC().Format(time.RFC3339Nano),
-	})
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(string(logJSON))
-}
-
-func (i infoMsg) quiet(msg string, args ...interface{}) {
-	i.pretty(msg, args...)
-}
-
-func (i infoMsg) pretty(msg string, args ...interface{}) {
-	c.Printf(msg, args...)
-}
-
-// Info :
-func Info(msg string, data ...interface{}) {
-	consoleLog(info, msg+"\n", data...)
-}
-
-var startupMessage startUpMsg
-
-type startUpMsg struct {
-}
-
-func (s startUpMsg) json(msg string, args ...interface{}) {
-}
-
-func (s startUpMsg) quiet(msg string, args ...interface{}) {
-}
-
-func (s startUpMsg) pretty(msg string, args ...interface{}) {
-	c.Printf(msg, args...)
-}
-
-// StartupMessage :
-func StartupMessage(msg string, data ...interface{}) {
-	consoleLog(startupMessage, msg+"\n", data...)
 }

@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"time"
 
@@ -40,6 +41,23 @@ type MQTTArgs struct {
 	MaxReconnectInterval time.Duration  `json:"reconnectInterval"`
 	KeepAlive            time.Duration  `json:"keepAliveInterval"`
 	RootCAs              *x509.CertPool `json:"-"`
+}
+
+// Validate MQTTArgs fields
+func (m MQTTArgs) Validate() error {
+	if !m.Enable {
+		return nil
+	}
+	u, err := xnet.ParseURL(m.Broker.String())
+	if err != nil {
+		return err
+	}
+	switch u.Scheme {
+	case "ws", "wss", "tcp", "ssl", "tls", "tcps":
+	default:
+		return errors.New("unknown protocol in broker address")
+	}
+	return nil
 }
 
 // MQTTTarget - MQTT target.
@@ -71,7 +89,7 @@ func (target *MQTTTarget) Send(eventData event.Event) error {
 	}
 	key := eventData.S3.Bucket.Name + "/" + objectName
 
-	data, err := json.Marshal(event.Log{eventData.EventName, key, []event.Event{eventData}})
+	data, err := json.Marshal(event.Log{EventName: eventData.EventName, Key: key, Records: []event.Event{eventData}})
 	if err != nil {
 		return err
 	}
@@ -109,7 +127,7 @@ func NewMQTTTarget(id string, args MQTTArgs) (*MQTTTarget, error) {
 	}
 
 	return &MQTTTarget{
-		id:     event.TargetID{id, "mqtt"},
+		id:     event.TargetID{ID: id, Name: "mqtt"},
 		args:   args,
 		client: client,
 	}, nil

@@ -19,7 +19,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -111,12 +110,6 @@ func partsMetaFromModTimes(modTimes []time.Time, algorithm BitrotAlgorithm, chec
 // TestListOnlineDisks - checks if listOnlineDisks and outDatedDisks
 // are consistent with each other.
 func TestListOnlineDisks(t *testing.T) {
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatalf("Failed to initialize config - %v", err)
-	}
-	defer os.RemoveAll(rootPath)
-
 	obj, disks, err := prepareXL16()
 	if err != nil {
 		t.Fatalf("Prepare XL backend failed - %v", err)
@@ -207,7 +200,7 @@ func TestListOnlineDisks(t *testing.T) {
 			t.Fatalf("Failed to make a bucket %v", err)
 		}
 
-		_, err = obj.PutObject(context.Background(), bucket, object, mustGetHashReader(t, bytes.NewReader(data), int64(len(data)), "", ""), nil)
+		_, err = obj.PutObject(context.Background(), bucket, object, mustGetPutObjReader(t, bytes.NewReader(data), int64(len(data)), "", ""), nil, ObjectOptions{})
 		if err != nil {
 			t.Fatalf("Failed to putObject %v", err)
 		}
@@ -265,7 +258,7 @@ func TestListOnlineDisks(t *testing.T) {
 				i+1, test.expectedTime, modTime)
 		}
 
-		availableDisks, newErrs, _ := disksWithAllParts(context.Background(), onlineDisks, partsMetadata, test.errs, bucket, object)
+		availableDisks, newErrs := disksWithAllParts(context.Background(), onlineDisks, partsMetadata, test.errs, bucket, object)
 		test.errs = newErrs
 
 		if test._tamperBackend != noTamper {
@@ -280,12 +273,6 @@ func TestListOnlineDisks(t *testing.T) {
 
 func TestDisksWithAllParts(t *testing.T) {
 	ctx := context.Background()
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatalf("Failed to initialize config - %v", err)
-	}
-	defer os.RemoveAll(rootPath)
-
 	obj, disks, err := prepareXL16()
 	if err != nil {
 		t.Fatalf("Prepare XL backend failed - %v", err)
@@ -305,7 +292,7 @@ func TestDisksWithAllParts(t *testing.T) {
 		t.Fatalf("Failed to make a bucket %v", err)
 	}
 
-	_, err = obj.PutObject(ctx, bucket, object, mustGetHashReader(t, bytes.NewReader(data), int64(len(data)), "", ""), nil)
+	_, err = obj.PutObject(ctx, bucket, object, mustGetPutObjReader(t, bytes.NewReader(data), int64(len(data)), "", ""), nil, ObjectOptions{})
 	if err != nil {
 		t.Fatalf("Failed to putObject %v", err)
 	}
@@ -331,10 +318,7 @@ func TestDisksWithAllParts(t *testing.T) {
 	}
 
 	errs = make([]error, len(xlDisks))
-	filteredDisks, errs, err := disksWithAllParts(ctx, xlDisks, partsMetadata, errs, bucket, object)
-	if err != nil {
-		t.Errorf("Unexpected error: %s", err)
-	}
+	filteredDisks, errs := disksWithAllParts(ctx, xlDisks, partsMetadata, errs, bucket, object)
 
 	if len(filteredDisks) != len(xlDisks) {
 		t.Errorf("Unexpected number of disks: %d", len(filteredDisks))
@@ -366,10 +350,7 @@ func TestDisksWithAllParts(t *testing.T) {
 		t.Fatalf("Failed to read xl meta data %v", err)
 	}
 
-	filteredDisks, errs, err = disksWithAllParts(ctx, xlDisks, partsMetadata, errs, bucket, object)
-	if err != nil {
-		t.Errorf("Unexpected error: %s", err)
-	}
+	filteredDisks, errs = disksWithAllParts(ctx, xlDisks, partsMetadata, errs, bucket, object)
 
 	if len(filteredDisks) != len(xlDisks) {
 		t.Errorf("Unexpected number of disks: %d", len(filteredDisks))

@@ -13,7 +13,7 @@ checks:
 	@(env bash $(PWD)/buildscripts/checkgopath.sh)
 
 getdeps:
-	@echo "Installing golint" && go get -u github.com/golang/lint/golint
+	@echo "Installing golint" && go get -u golang.org/x/lint/golint
 	@echo "Installing gocyclo" && go get -u github.com/fzipp/gocyclo
 	@echo "Installing deadcode" && go get -u github.com/remyoudompheng/go-misc/deadcode
 	@echo "Installing misspell" && go get -u github.com/client9/misspell/cmd/misspell
@@ -23,8 +23,8 @@ verifiers: getdeps vet fmt lint cyclo deadcode spelling
 
 vet:
 	@echo "Running $@"
-	@go tool vet -atomic -bool -copylocks -nilfunc -printf -shadow -rangeloops -unreachable -unsafeptr -unusedresult cmd
-	@go tool vet -atomic -bool -copylocks -nilfunc -printf -shadow -rangeloops -unreachable -unsafeptr -unusedresult pkg
+	@go tool vet cmd
+	@go tool vet pkg
 
 fmt:
 	@echo "Running $@"
@@ -42,8 +42,8 @@ ineffassign:
 
 cyclo:
 	@echo "Running $@"
-	@${GOPATH}/bin/gocyclo -over 100 cmd
-	@${GOPATH}/bin/gocyclo -over 100 pkg
+	@${GOPATH}/bin/gocyclo -over 200 cmd
+	@${GOPATH}/bin/gocyclo -over 200 pkg
 
 deadcode:
 	@echo "Running $@"
@@ -61,6 +61,8 @@ check: test
 test: verifiers build
 	@echo "Running unit tests"
 	@go test $(GOFLAGS) -tags kqueue ./...
+
+verify: build
 	@echo "Verifying build"
 	@(env bash $(PWD)/buildscripts/verify-build.sh)
 
@@ -72,6 +74,9 @@ coverage: build
 build: checks
 	@echo "Building minio binary to './minio'"
 	@CGO_ENABLED=0 go build -tags kqueue --ldflags $(BUILD_LDFLAGS) -o $(PWD)/minio
+
+docker: build
+	@docker build -t $(TAG) . -f Dockerfile.dev
 
 pkg-add:
 	@echo "Adding new package $(PKG)"

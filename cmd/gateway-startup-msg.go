@@ -55,10 +55,14 @@ func printGatewayCommonMsg(apiEndpoints []string) {
 	cred := globalServerConfig.GetCredential()
 
 	apiEndpointStr := strings.Join(apiEndpoints, "  ")
+
 	// Colorize the message and print.
-	logger.StartupMessage(colorBlue("\nEndpoint: ") + colorBold(fmt.Sprintf(getFormatStr(len(apiEndpointStr), 1), apiEndpointStr)))
-	logger.StartupMessage(colorBlue("AccessKey: ") + colorBold(fmt.Sprintf("%s ", cred.AccessKey)))
-	logger.StartupMessage(colorBlue("SecretKey: ") + colorBold(fmt.Sprintf("%s ", cred.SecretKey)))
+	logger.StartupMessage(colorBlue("Endpoint: ") + colorBold(fmt.Sprintf(getFormatStr(len(apiEndpointStr), 1), apiEndpointStr)))
+	if isTerminal() && !globalCLIContext.Anonymous {
+		logger.StartupMessage(colorBlue("AccessKey: ") + colorBold(fmt.Sprintf("%s ", cred.AccessKey)))
+		logger.StartupMessage(colorBlue("SecretKey: ") + colorBold(fmt.Sprintf("%s ", cred.SecretKey)))
+	}
+	printEventNotifiers()
 
 	if globalIsBrowserEnabled {
 		logger.StartupMessage(colorBlue("\nBrowser Access:"))

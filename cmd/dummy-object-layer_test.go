@@ -19,9 +19,8 @@ package cmd
 import (
 	"context"
 	"io"
-	"time"
+	"net/http"
 
-	"github.com/minio/minio/pkg/hash"
 	"github.com/minio/minio/pkg/madmin"
 	"github.com/minio/minio/pkg/policy"
 )
@@ -60,19 +59,23 @@ func (api *DummyObjectLayer) ListObjectsV2(ctx context.Context, bucket, prefix, 
 	return
 }
 
-func (api *DummyObjectLayer) GetObject(ctx context.Context, bucket, object string, startOffset int64, length int64, writer io.Writer, etag string) (err error) {
+func (api *DummyObjectLayer) GetObjectNInfo(ctx context.Context, bucket, object string, rs *HTTPRangeSpec, h http.Header, lock LockType, opts ObjectOptions) (gr *GetObjectReader, err error) {
 	return
 }
 
-func (api *DummyObjectLayer) GetObjectInfo(ctx context.Context, bucket, object string) (objInfo ObjectInfo, err error) {
+func (api *DummyObjectLayer) GetObject(ctx context.Context, bucket, object string, startOffset int64, length int64, writer io.Writer, etag string, opts ObjectOptions) (err error) {
 	return
 }
 
-func (api *DummyObjectLayer) PutObject(ctx context.Context, bucket, object string, data *hash.Reader, metadata map[string]string) (objInfo ObjectInfo, err error) {
+func (api *DummyObjectLayer) GetObjectInfo(ctx context.Context, bucket, object string, opts ObjectOptions) (objInfo ObjectInfo, err error) {
 	return
 }
 
-func (api *DummyObjectLayer) CopyObject(ctx context.Context, srcBucket, srcObject, destBucket, destObject string, srcInfo ObjectInfo) (objInfo ObjectInfo, err error) {
+func (api *DummyObjectLayer) PutObject(ctx context.Context, bucket, object string, data *PutObjReader, metadata map[string]string, opts ObjectOptions) (objInfo ObjectInfo, err error) {
+	return
+}
+
+func (api *DummyObjectLayer) CopyObject(ctx context.Context, srcBucket, srcObject, destBucket, destObject string, srcInfo ObjectInfo, srcOpts, dstOpts ObjectOptions) (objInfo ObjectInfo, err error) {
 	return
 }
 
@@ -84,15 +87,15 @@ func (api *DummyObjectLayer) ListMultipartUploads(ctx context.Context, bucket, p
 	return
 }
 
-func (api *DummyObjectLayer) NewMultipartUpload(ctx context.Context, bucket, object string, metadata map[string]string) (uploadID string, err error) {
+func (api *DummyObjectLayer) NewMultipartUpload(ctx context.Context, bucket, object string, metadata map[string]string, opts ObjectOptions) (uploadID string, err error) {
 	return
 }
 
-func (api *DummyObjectLayer) CopyObjectPart(ctx context.Context, srcBucket, srcObject, destBucket, destObject string, uploadID string, partID int, startOffset int64, length int64, srcInfo ObjectInfo) (info PartInfo, err error) {
+func (api *DummyObjectLayer) CopyObjectPart(ctx context.Context, srcBucket, srcObject, destBucket, destObject string, uploadID string, partID int, startOffset int64, length int64, srcInfo ObjectInfo, srcOpts, dstOpts ObjectOptions) (info PartInfo, err error) {
 	return
 }
 
-func (api *DummyObjectLayer) PutObjectPart(ctx context.Context, bucket, object, uploadID string, partID int, data *hash.Reader) (info PartInfo, err error) {
+func (api *DummyObjectLayer) PutObjectPart(ctx context.Context, bucket, object, uploadID string, partID int, data *PutObjReader, opts ObjectOptions) (info PartInfo, err error) {
 	return
 }
 
@@ -104,7 +107,7 @@ func (api *DummyObjectLayer) AbortMultipartUpload(ctx context.Context, bucket, o
 	return
 }
 
-func (api *DummyObjectLayer) CompleteMultipartUpload(ctx context.Context, bucket, object, uploadID string, uploadedParts []CompletePart) (objInfo ObjectInfo, err error) {
+func (api *DummyObjectLayer) CompleteMultipartUpload(ctx context.Context, bucket, object, uploadID string, uploadedParts []CompletePart, opts ObjectOptions) (objInfo ObjectInfo, err error) {
 	return
 }
 
@@ -132,14 +135,6 @@ func (api *DummyObjectLayer) ListObjectsHeal(ctx context.Context, bucket, prefix
 	return
 }
 
-func (api *DummyObjectLayer) ListLocks(ctx context.Context, bucket, prefix string, duration time.Duration) (info []VolumeLockInfo, err error) {
-	return
-}
-
-func (api *DummyObjectLayer) ClearLocks(context.Context, []VolumeLockInfo) (err error) {
-	return
-}
-
 func (api *DummyObjectLayer) SetBucketPolicy(context.Context, string, *policy.Policy) (err error) {
 	return
 }
@@ -159,7 +154,14 @@ func (api *DummyObjectLayer) DeleteBucketPolicy(context.Context, string) (err er
 func (api *DummyObjectLayer) IsNotificationSupported() (b bool) {
 	return
 }
+func (api *DummyObjectLayer) IsListenBucketSupported() (b bool) {
+	return
+}
 
 func (api *DummyObjectLayer) IsEncryptionSupported() (b bool) {
+	return
+}
+
+func (api *DummyObjectLayer) IsCompressionSupported() (b bool) {
 	return
 }

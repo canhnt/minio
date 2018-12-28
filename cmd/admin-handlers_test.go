@@ -26,8 +26,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,100 +38,194 @@ import (
 
 var (
 	configJSON = []byte(`{
-	"version": "13",
-	"credential": {
-		"accessKey": "minio",
-		"secretKey": "minio123"
+  "version": "33",
+  "credential": {
+    "accessKey": "minio",
+    "secretKey": "minio123"
+  },
+  "region": "us-east-1",
+  "worm": "off",
+  "storageclass": {
+    "standard": "",
+    "rrs": ""
+  },
+  "cache": {
+    "drives": [],
+    "expiry": 90,
+    "maxuse": 80,
+    "exclude": []
+  },
+  "kms": {
+    "vault": {
+      "endpoint": "",
+      "auth": {
+        "type": "",
+        "approle": {
+          "id": "",
+          "secret": ""
+        }
+      },
+      "key-id": {
+        "name": "",
+        "version": 0
+      }
+    }
+  },
+  "notify": {
+    "amqp": {
+      "1": {
+        "enable": false,
+        "url": "",
+        "exchange": "",
+        "routingKey": "",
+        "exchangeType": "",
+        "deliveryMode": 0,
+        "mandatory": false,
+        "immediate": false,
+        "durable": false,
+        "internal": false,
+        "noWait": false,
+        "autoDeleted": false
+      }
+    },
+    "elasticsearch": {
+      "1": {
+        "enable": false,
+        "format": "namespace",
+        "url": "",
+        "index": ""
+      }
+    },
+    "kafka": {
+      "1": {
+        "enable": false,
+        "brokers": null,
+        "topic": "",
+        "tls": {
+          "enable": false,
+          "skipVerify": false,
+          "clientAuth": 0
+        },
+        "sasl": {
+          "enable": false,
+          "username": "",
+          "password": ""
+        }
+      }
+    },
+    "mqtt": {
+      "1": {
+        "enable": false,
+        "broker": "",
+        "topic": "",
+        "qos": 0,
+        "clientId": "",
+        "username": "",
+        "password": "",
+        "reconnectInterval": 0,
+        "keepAliveInterval": 0
+      }
+    },
+    "mysql": {
+      "1": {
+        "enable": false,
+        "format": "namespace",
+        "dsnString": "",
+        "table": "",
+        "host": "",
+        "port": "",
+        "user": "",
+        "password": "",
+        "database": ""
+      }
+    },
+    "nats": {
+      "1": {
+        "enable": false,
+        "address": "",
+        "subject": "",
+        "username": "",
+        "password": "",
+        "token": "",
+        "secure": false,
+        "pingInterval": 0,
+        "streaming": {
+          "enable": false,
+          "clusterID": "",
+          "async": false,
+          "maxPubAcksInflight": 0
+        }
+      }
 	},
-	"region": "us-west-1",
-	"logger": {
-		"console": {
-			"enable": true,
-			"level": "fatal"
-		},
-		"file": {
+    "nsq": {
+      "1": {
+        "enable": false,
+        "nsqdAddress": "",
+        "topic": "",
+        "tls": {
 			"enable": false,
-			"fileName": "",
-			"level": ""
+			"skipVerify": false
 		}
-	},
-	"notify": {
-		"amqp": {
-			"1": {
-				"enable": false,
-				"url": "",
-				"exchange": "",
-				"routingKey": "",
-				"exchangeType": "",
-				"mandatory": false,
-				"immediate": false,
-				"durable": false,
-				"internal": false,
-				"noWait": false,
-				"autoDeleted": false
-			}
-		},
-		"nats": {
-			"1": {
-				"enable": false,
-				"address": "",
-				"subject": "",
-				"username": "",
-				"password": "",
-				"token": "",
-				"secure": false,
-				"pingInterval": 0,
-				"streaming": {
-					"enable": false,
-					"clusterID": "",
-					"clientID": "",
-					"async": false,
-					"maxPubAcksInflight": 0
-				}
-			}
-		},
-		"elasticsearch": {
-			"1": {
-				"enable": false,
-				"url": "",
-				"index": ""
-			}
-		},
-		"redis": {
-			"1": {
-				"enable": false,
-				"address": "",
-				"password": "",
-				"key": ""
-			}
-		},
-		"postgresql": {
-			"1": {
-				"enable": false,
-				"connectionString": "",
-				"table": "",
-				"host": "",
-				"port": "",
-				"user": "",
-				"password": "",
-				"database": ""
-			}
-		},
-		"kafka": {
-			"1": {
-				"enable": false,
-				"brokers": null,
-				"topic": ""
-			}
-		},
-		"webhook": {
-			"1": {
-				"enable": false,
-				"endpoint": ""
-			}
-		}
-	}
-}`)
+      }
+    },
+    "postgresql": {
+      "1": {
+        "enable": false,
+        "format": "namespace",
+        "connectionString": "",
+        "table": "",
+        "host": "",
+        "port": "",
+        "user": "",
+        "password": "",
+        "database": ""
+      }
+    },
+    "redis": {
+      "1": {
+        "enable": false,
+        "format": "namespace",
+        "address": "",
+        "password": "",
+        "key": ""
+      }
+    },
+    "webhook": {
+      "1": {
+        "enable": false,
+        "endpoint": ""
+      }
+    }
+  },
+  "logger": {
+    "console": {
+      "enabled": true
+    },
+    "http": {
+      "1": {
+        "enabled": false,
+        "endpoint": "https://username:password@example.com/api"
+      }
+    }
+  },
+  "compress": {
+    "enabled": false,
+    "extensions":[".txt",".log",".csv",".json"],
+    "mime-types":["text/csv","text/plain","application/json"]
+  },
+  "openid": {
+    "jwks": {
+      "url": ""
+    }
+  },
+  "policy": {
+    "opa": {
+      "url": "",
+      "authToken": ""
+    }
+  }
+}
+`)
 )
 
 // adminXLTestBed - encapsulates subsystems that need to be setup for
@@ -149,15 +243,15 @@ func prepareAdminXLTestBed() (*adminXLTestBed, error) {
 	// reset global variables to start afresh.
 	resetTestGlobals()
 
-	// Initialize minio server config.
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		return nil, err
-	}
 	// Initializing objectLayer for HealFormatHandler.
 	objLayer, xlDirs, xlErr := initTestXLObjLayer()
 	if xlErr != nil {
 		return nil, xlErr
+	}
+
+	// Initialize minio server config.
+	if err := newTestConfig(globalMinioDefaultRegion, objLayer); err != nil {
+		return nil, err
 	}
 
 	// Initialize boot time
@@ -176,30 +270,25 @@ func prepareAdminXLTestBed() (*adminXLTestBed, error) {
 	// Init global heal state
 	initAllHealState(globalIsXL)
 
-	globalNotificationSys, err = NewNotificationSys(globalServerConfig, globalEndpoints)
-	if err != nil {
-		return nil, err
-	}
+	globalNotificationSys = NewNotificationSys(globalServerConfig, globalEndpoints)
 
 	// Create new policy system.
 	globalPolicySys = NewPolicySys()
 
 	// Setup admin mgmt REST API handlers.
 	adminRouter := mux.NewRouter()
-	registerAdminRouter(adminRouter)
+	registerAdminRouter(adminRouter, true)
 
 	return &adminXLTestBed{
-		configPath: rootPath,
-		xlDirs:     xlDirs,
-		objLayer:   objLayer,
-		router:     adminRouter,
+		xlDirs:   xlDirs,
+		objLayer: objLayer,
+		router:   adminRouter,
 	}, nil
 }
 
 // TearDown - method that resets the test bed for subsequent unit
 // tests to start afresh.
 func (atb *adminXLTestBed) TearDown() {
-	os.RemoveAll(atb.configPath)
 	removeRoots(atb.xlDirs)
 	resetTestGlobals()
 }
@@ -219,8 +308,8 @@ func (atb *adminXLTestBed) GenerateHealTestData(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			objectName := fmt.Sprintf("%s-%d", objName, i)
 			_, err = atb.objLayer.PutObject(context.Background(), bucketName, objectName,
-				mustGetHashReader(t, bytes.NewReader([]byte("hello")),
-					int64(len("hello")), "", ""), nil)
+				mustGetPutObjReader(t, bytes.NewReader([]byte("hello")),
+					int64(len("hello")), "", ""), nil, ObjectOptions{})
 			if err != nil {
 				t.Fatalf("Failed to create %s - %v", objectName,
 					err)
@@ -232,14 +321,14 @@ func (atb *adminXLTestBed) GenerateHealTestData(t *testing.T) {
 	{
 		objName := "mpObject"
 		uploadID, err := atb.objLayer.NewMultipartUpload(context.Background(), bucketName,
-			objName, nil)
+			objName, nil, ObjectOptions{})
 		if err != nil {
 			t.Fatalf("mp new error: %v", err)
 		}
 
 		_, err = atb.objLayer.PutObjectPart(context.Background(), bucketName, objName,
-			uploadID, 3, mustGetHashReader(t, bytes.NewReader(
-				[]byte("hello")), int64(len("hello")), "", ""))
+			uploadID, 3, mustGetPutObjReader(t, bytes.NewReader(
+				[]byte("hello")), int64(len("hello")), "", ""), ObjectOptions{})
 		if err != nil {
 			t.Fatalf("mp put error: %v", err)
 		}
@@ -418,6 +507,8 @@ func getServiceCmdRequest(cmd cmdType, cred auth.Credentials, body []byte) (*htt
 
 	// Set body
 	req.Body = ioutil.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+
 	// Set sha-sum header
 	req.Header.Set("X-Amz-Content-Sha256", getSHA256Hash(body))
 
@@ -444,15 +535,21 @@ func testServicesCmdHandler(cmd cmdType, t *testing.T) {
 	globalMinioAddr = "127.0.0.1:9000"
 	initGlobalAdminPeers(mustGetNewEndpointList("http://127.0.0.1:9000/d1"))
 
+	var wg sync.WaitGroup
+
 	// Setting up a go routine to simulate ServerRouter's
 	// handleServiceSignals for stop and restart commands.
 	if cmd == restartCmd {
-		go testServiceSignalReceiver(cmd, t)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testServiceSignalReceiver(cmd, t)
+		}()
 	}
 	credentials := globalServerConfig.GetCredential()
 
 	body, err := json.Marshal(madmin.ServiceAction{
-		cmd.toServiceActionValue()})
+		Action: cmd.toServiceActionValue()})
 	if err != nil {
 		t.Fatalf("JSONify error: %v", err)
 	}
@@ -483,6 +580,9 @@ func testServicesCmdHandler(cmd cmdType, t *testing.T) {
 		t.Errorf("Expected to receive %d status code but received %d. Body (%s)",
 			http.StatusOK, rec.Code, string(resp))
 	}
+
+	// Wait until testServiceSignalReceiver() called in a goroutine quits.
+	wg.Wait()
 }
 
 // Test for service status management REST API.
@@ -538,8 +638,14 @@ func TestServiceSetCreds(t *testing.T) {
 		if err != nil {
 			t.Fatalf("JSONify err: %v", err)
 		}
+
+		ebody, err := madmin.EncryptData(credentials.SecretKey, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
 		// Construct setCreds request
-		req, err := getServiceCmdRequest(setCreds, credentials, body)
+		req, err := getServiceCmdRequest(setCreds, credentials, ebody)
 		if err != nil {
 			t.Fatalf("Failed to build service status request %v", err)
 		}
@@ -566,193 +672,6 @@ func TestServiceSetCreds(t *testing.T) {
 			if cred.SecretKey != testCase.SecretKey {
 				t.Errorf("Test %d: Wrong secret key, expected = %s, found = %s", i+1, testCase.SecretKey, cred.SecretKey)
 			}
-		}
-	}
-}
-
-// mkLockQueryVal - helper function to build lock query param.
-func mkLockQueryVal(bucket, prefix, durationStr string) url.Values {
-	qVal := url.Values{}
-	qVal.Set(string(mgmtBucket), bucket)
-	qVal.Set(string(mgmtPrefix), prefix)
-	qVal.Set(string(mgmtLockOlderThan), durationStr)
-	return qVal
-}
-
-// Test for locks list management REST API.
-func TestListLocksHandler(t *testing.T) {
-	adminTestBed, err := prepareAdminXLTestBed()
-	if err != nil {
-		t.Fatal("Failed to initialize a single node XL backend for admin handler tests.")
-	}
-	defer adminTestBed.TearDown()
-
-	// Initialize admin peers to make admin RPC calls.
-	globalMinioAddr = "127.0.0.1:9000"
-	initGlobalAdminPeers(mustGetNewEndpointList("http://127.0.0.1:9000/d1"))
-
-	testCases := []struct {
-		bucket         string
-		prefix         string
-		duration       string
-		expectedStatus int
-	}{
-		// Test 1 - valid testcase
-		{
-			bucket:         "mybucket",
-			prefix:         "myobject",
-			duration:       "1s",
-			expectedStatus: http.StatusOK,
-		},
-		// Test 2 - invalid duration
-		{
-			bucket:         "mybucket",
-			prefix:         "myprefix",
-			duration:       "invalidDuration",
-			expectedStatus: http.StatusBadRequest,
-		},
-		// Test 3 - invalid bucket name
-		{
-			bucket:         `invalid\\Bucket`,
-			prefix:         "myprefix",
-			duration:       "1h",
-			expectedStatus: http.StatusBadRequest,
-		},
-		// Test 4 - invalid prefix
-		{
-			bucket:         "mybucket",
-			prefix:         `invalid\\Prefix`,
-			duration:       "1h",
-			expectedStatus: http.StatusBadRequest,
-		},
-	}
-
-	for i, test := range testCases {
-		queryVal := mkLockQueryVal(test.bucket, test.prefix, test.duration)
-		req, err := newTestRequest("GET", "/minio/admin/v1/locks?"+queryVal.Encode(), 0, nil)
-		if err != nil {
-			t.Fatalf("Test %d - Failed to construct list locks request - %v", i+1, err)
-		}
-
-		cred := globalServerConfig.GetCredential()
-		err = signRequestV4(req, cred.AccessKey, cred.SecretKey)
-		if err != nil {
-			t.Fatalf("Test %d - Failed to sign list locks request - %v", i+1, err)
-		}
-		rec := httptest.NewRecorder()
-		adminTestBed.router.ServeHTTP(rec, req)
-		if test.expectedStatus != rec.Code {
-			t.Errorf("Test %d - Expected HTTP status code %d but received %d", i+1, test.expectedStatus, rec.Code)
-		}
-	}
-}
-
-// Test for locks clear management REST API.
-func TestClearLocksHandler(t *testing.T) {
-	adminTestBed, err := prepareAdminXLTestBed()
-	if err != nil {
-		t.Fatal("Failed to initialize a single node XL backend for admin handler tests.")
-	}
-	defer adminTestBed.TearDown()
-
-	// Initialize admin peers to make admin RPC calls.
-	initGlobalAdminPeers(mustGetNewEndpointList("http://127.0.0.1:9000/d1"))
-
-	testCases := []struct {
-		bucket         string
-		prefix         string
-		duration       string
-		expectedStatus int
-	}{
-		// Test 1 - valid testcase
-		{
-			bucket:         "mybucket",
-			prefix:         "myobject",
-			duration:       "1s",
-			expectedStatus: http.StatusOK,
-		},
-		// Test 2 - invalid duration
-		{
-			bucket:         "mybucket",
-			prefix:         "myprefix",
-			duration:       "invalidDuration",
-			expectedStatus: http.StatusBadRequest,
-		},
-		// Test 3 - invalid bucket name
-		{
-			bucket:         `invalid\\Bucket`,
-			prefix:         "myprefix",
-			duration:       "1h",
-			expectedStatus: http.StatusBadRequest,
-		},
-		// Test 4 - invalid prefix
-		{
-			bucket:         "mybucket",
-			prefix:         `invalid\\Prefix`,
-			duration:       "1h",
-			expectedStatus: http.StatusBadRequest,
-		},
-	}
-
-	for i, test := range testCases {
-		queryVal := mkLockQueryVal(test.bucket, test.prefix, test.duration)
-		req, err := newTestRequest("DELETE", "/minio/admin/v1/locks?"+queryVal.Encode(), 0, nil)
-		if err != nil {
-			t.Fatalf("Test %d - Failed to construct clear locks request - %v", i+1, err)
-		}
-
-		cred := globalServerConfig.GetCredential()
-		err = signRequestV4(req, cred.AccessKey, cred.SecretKey)
-		if err != nil {
-			t.Fatalf("Test %d - Failed to sign clear locks request - %v", i+1, err)
-		}
-		rec := httptest.NewRecorder()
-		adminTestBed.router.ServeHTTP(rec, req)
-		if test.expectedStatus != rec.Code {
-			t.Errorf("Test %d - Expected HTTP status code %d but received %d", i+1, test.expectedStatus, rec.Code)
-		}
-	}
-}
-
-// Test for lock query param validation helper function.
-func TestValidateLockQueryParams(t *testing.T) {
-	// reset globals.
-	// this is to make sure that the tests are not affected by modified globals.
-	resetTestGlobals()
-	// initialize NSLock.
-	initNSLock(false)
-	// Sample query values for test cases.
-	allValidVal := mkLockQueryVal("bucket", "prefix", "1s")
-	invalidBucketVal := mkLockQueryVal(`invalid\\Bucket`, "prefix", "1s")
-	invalidPrefixVal := mkLockQueryVal("bucket", `invalid\\Prefix`, "1s")
-	invalidOlderThanVal := mkLockQueryVal("bucket", "prefix", "invalidDuration")
-
-	testCases := []struct {
-		qVals  url.Values
-		apiErr APIErrorCode
-	}{
-		{
-			qVals:  invalidBucketVal,
-			apiErr: ErrInvalidBucketName,
-		},
-		{
-			qVals:  invalidPrefixVal,
-			apiErr: ErrInvalidObjectName,
-		},
-		{
-			qVals:  invalidOlderThanVal,
-			apiErr: ErrInvalidDuration,
-		},
-		{
-			qVals:  allValidVal,
-			apiErr: ErrNone,
-		},
-	}
-
-	for i, test := range testCases {
-		_, _, _, apiErr := validateLockQueryParams(test.qVals)
-		if apiErr != test.apiErr {
-			t.Errorf("Test %d - Expected error %v but received %v", i+1, test.apiErr, apiErr)
 		}
 	}
 }
@@ -818,16 +737,18 @@ func TestSetConfigHandler(t *testing.T) {
 	globalMinioAddr = "127.0.0.1:9000"
 	initGlobalAdminPeers(mustGetNewEndpointList("http://127.0.0.1:9000/d1"))
 
-	// SetConfigHandler restarts minio setup - need to start a
-	// signal receiver to receive on globalServiceSignalCh.
-	go testServiceSignalReceiver(restartCmd, t)
-
 	// Prepare query params for set-config mgmt REST API.
 	queryVal := url.Values{}
 	queryVal.Set("config", "")
 
+	password := globalServerConfig.GetCredential().SecretKey
+	econfigJSON, err := madmin.EncryptData(password, configJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	req, err := buildAdminRequest(queryVal, http.MethodPut, "/config",
-		int64(len(configJSON)), bytes.NewReader(configJSON))
+		int64(len(econfigJSON)), bytes.NewReader(econfigJSON))
 	if err != nil {
 		t.Fatalf("Failed to construct set-config object request - %v", err)
 	}
@@ -835,23 +756,13 @@ func TestSetConfigHandler(t *testing.T) {
 	rec := httptest.NewRecorder()
 	adminTestBed.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Errorf("Expected to succeed but failed with %d", rec.Code)
-	}
-
-	result := setConfigResult{}
-	err = json.NewDecoder(rec.Body).Decode(&result)
-	if err != nil {
-		t.Fatalf("Failed to decode set config result json %v", err)
-	}
-
-	if !result.Status {
-		t.Error("Expected set-config to succeed, but failed")
+		t.Errorf("Expected to succeed but failed with %d, body: %s", rec.Code, rec.Body)
 	}
 
 	// Check that a very large config file returns an error.
 	{
 		// Make a large enough config string
-		invalidCfg := []byte(strings.Repeat("A", maxConfigJSONSize+1))
+		invalidCfg := []byte(strings.Repeat("A", maxEConfigJSONSize+1))
 		req, err := buildAdminRequest(queryVal, http.MethodPut, "/config",
 			int64(len(invalidCfg)), bytes.NewReader(invalidCfg))
 		if err != nil {
@@ -870,7 +781,7 @@ func TestSetConfigHandler(t *testing.T) {
 	// Check that a config with duplicate keys in an object return
 	// error.
 	{
-		invalidCfg := append(configJSON[:len(configJSON)-1], []byte(`, "version": "15"}`)...)
+		invalidCfg := append(econfigJSON[:len(econfigJSON)-1], []byte(`, "version": "15"}`)...)
 		req, err := buildAdminRequest(queryVal, http.MethodPut, "/config",
 			int64(len(invalidCfg)), bytes.NewReader(invalidCfg))
 		if err != nil {
@@ -881,7 +792,7 @@ func TestSetConfigHandler(t *testing.T) {
 		adminTestBed.router.ServeHTTP(rec, req)
 		respBody := string(rec.Body.Bytes())
 		if rec.Code != http.StatusBadRequest ||
-			!strings.Contains(respBody, "JSON configuration provided has objects with duplicate keys") {
+			!strings.Contains(respBody, "JSON configuration provided is of incorrect format") {
 			t.Errorf("Got unexpected response code or body %d - %s", rec.Code, respBody)
 		}
 	}
@@ -955,90 +866,15 @@ func TestToAdminAPIErr(t *testing.T) {
 		// 3. Non-admin API specific error.
 		{
 			err:            errDiskNotFound,
-			expectedAPIErr: toAPIErrorCode(errDiskNotFound),
+			expectedAPIErr: toAPIErrorCode(context.Background(), errDiskNotFound),
 		},
 	}
 
 	for i, test := range testCases {
-		actualErr := toAdminAPIErrCode(test.err)
+		actualErr := toAdminAPIErrCode(context.Background(), test.err)
 		if actualErr != test.expectedAPIErr {
 			t.Errorf("Test %d: Expected %v but received %v",
 				i+1, test.expectedAPIErr, actualErr)
-		}
-	}
-}
-
-func TestWriteSetConfigResponse(t *testing.T) {
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(rootPath)
-	testCases := []struct {
-		status bool
-		errs   []error
-	}{
-		// 1. all nodes returned success.
-		{
-			status: true,
-			errs:   []error{nil, nil, nil, nil},
-		},
-		// 2. some nodes returned errors.
-		{
-			status: false,
-			errs:   []error{errDiskNotFound, nil, errDiskAccessDenied, errFaultyDisk},
-		},
-	}
-
-	testPeers := []adminPeer{
-		{
-			addr: "localhost:9001",
-		},
-		{
-			addr: "localhost:9002",
-		},
-		{
-			addr: "localhost:9003",
-		},
-		{
-			addr: "localhost:9004",
-		},
-	}
-
-	testURL, err := url.Parse("http://dummy.com")
-	if err != nil {
-		t.Fatalf("Failed to parse a place-holder url")
-	}
-
-	var actualResult setConfigResult
-	for i, test := range testCases {
-		rec := httptest.NewRecorder()
-		writeSetConfigResponse(rec, testPeers, test.errs, test.status, testURL)
-		resp := rec.Result()
-		jsonBytes, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatalf("Test %d: Failed to read response %v", i+1, err)
-		}
-
-		err = json.Unmarshal(jsonBytes, &actualResult)
-		if err != nil {
-			t.Fatalf("Test %d: Failed to unmarshal json %v", i+1, err)
-		}
-		if actualResult.Status != test.status {
-			t.Errorf("Test %d: Expected status %v but received %v", i+1, test.status, actualResult.Status)
-		}
-		for p, res := range actualResult.NodeResults {
-			if res.Name != testPeers[p].addr {
-				t.Errorf("Test %d: Expected node name %s but received %s", i+1, testPeers[p].addr, res.Name)
-			}
-			expectedErrMsg := fmt.Sprintf("%v", test.errs[p])
-			if res.ErrMsg != expectedErrMsg {
-				t.Errorf("Test %d: Expected error %s but received %s", i+1, expectedErrMsg, res.ErrMsg)
-			}
-			expectedErrSet := test.errs[p] != nil
-			if res.ErrSet != expectedErrSet {
-				t.Errorf("Test %d: Expected ErrSet %v but received %v", i+1, expectedErrSet, res.ErrSet)
-			}
 		}
 	}
 }

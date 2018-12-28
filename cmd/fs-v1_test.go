@@ -26,12 +26,6 @@ import (
 
 // Tests for if parent directory is object
 func TestFSParentDirIsObject(t *testing.T) {
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(rootPath)
-
 	obj, disk, err := prepareFS()
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +40,7 @@ func TestFSParentDirIsObject(t *testing.T) {
 	}
 	objectContent := "12345"
 	objInfo, err := obj.PutObject(context.Background(), bucketName, objectName,
-		mustGetHashReader(t, bytes.NewReader([]byte(objectContent)), int64(len(objectContent)), "", ""), nil)
+		mustGetPutObjReader(t, bytes.NewReader([]byte(objectContent)), int64(len(objectContent)), "", ""), nil, ObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,12 +114,6 @@ func TestNewFS(t *testing.T) {
 // TestFSShutdown - initialize a new FS object layer then calls
 // Shutdown to check returned results
 func TestFSShutdown(t *testing.T) {
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(rootPath)
-
 	bucketName := "testbucket"
 	objectName := "object"
 	// Create and return an fsObject with its path in the disk
@@ -133,9 +121,10 @@ func TestFSShutdown(t *testing.T) {
 		disk := filepath.Join(globalTestTmpDir, "minio-"+nextSuffix())
 		obj := initFSObjects(disk, t)
 		fs := obj.(*FSObjects)
+
 		objectContent := "12345"
 		obj.MakeBucketWithLocation(context.Background(), bucketName, "")
-		obj.PutObject(context.Background(), bucketName, objectName, mustGetHashReader(t, bytes.NewReader([]byte(objectContent)), int64(len(objectContent)), "", ""), nil)
+		obj.PutObject(context.Background(), bucketName, objectName, mustGetPutObjReader(t, bytes.NewReader([]byte(objectContent)), int64(len(objectContent)), "", ""), nil, ObjectOptions{})
 		return fs, disk
 	}
 
@@ -214,7 +203,7 @@ func TestFSPutObject(t *testing.T) {
 	}
 
 	// With a regular object.
-	_, err := obj.PutObject(context.Background(), bucketName+"non-existent", objectName, mustGetHashReader(t, bytes.NewReader([]byte("abcd")), int64(len("abcd")), "", ""), nil)
+	_, err := obj.PutObject(context.Background(), bucketName+"non-existent", objectName, mustGetPutObjReader(t, bytes.NewReader([]byte("abcd")), int64(len("abcd")), "", ""), nil, ObjectOptions{})
 	if err == nil {
 		t.Fatal("Unexpected should fail here, bucket doesn't exist")
 	}
@@ -223,7 +212,7 @@ func TestFSPutObject(t *testing.T) {
 	}
 
 	// With a directory object.
-	_, err = obj.PutObject(context.Background(), bucketName+"non-existent", objectName+"/", mustGetHashReader(t, bytes.NewReader([]byte("abcd")), 0, "", ""), nil)
+	_, err = obj.PutObject(context.Background(), bucketName+"non-existent", objectName+"/", mustGetPutObjReader(t, bytes.NewReader([]byte("abcd")), 0, "", ""), nil, ObjectOptions{})
 	if err == nil {
 		t.Fatal("Unexpected should fail here, bucket doesn't exist")
 	}
@@ -231,11 +220,11 @@ func TestFSPutObject(t *testing.T) {
 		t.Fatalf("Expected error type BucketNotFound, got %#v", err)
 	}
 
-	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetHashReader(t, bytes.NewReader([]byte("abcd")), int64(len("abcd")), "", ""), nil)
+	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetPutObjReader(t, bytes.NewReader([]byte("abcd")), int64(len("abcd")), "", ""), nil, ObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = obj.PutObject(context.Background(), bucketName, objectName+"/1", mustGetHashReader(t, bytes.NewReader([]byte("abcd")), int64(len("abcd")), "", ""), nil)
+	_, err = obj.PutObject(context.Background(), bucketName, objectName+"/1", mustGetPutObjReader(t, bytes.NewReader([]byte("abcd")), int64(len("abcd")), "", ""), nil, ObjectOptions{})
 	if err == nil {
 		t.Fatal("Unexpected should fail here, backend corruption occurred")
 	}
@@ -250,7 +239,7 @@ func TestFSPutObject(t *testing.T) {
 		}
 	}
 
-	_, err = obj.PutObject(context.Background(), bucketName, objectName+"/1/", mustGetHashReader(t, bytes.NewReader([]byte("abcd")), 0, "", ""), nil)
+	_, err = obj.PutObject(context.Background(), bucketName, objectName+"/1/", mustGetPutObjReader(t, bytes.NewReader([]byte("abcd")), 0, "", ""), nil, ObjectOptions{})
 	if err == nil {
 		t.Fatal("Unexpected should fail here, backned corruption occurred")
 	}
@@ -278,7 +267,7 @@ func TestFSDeleteObject(t *testing.T) {
 	objectName := "object"
 
 	obj.MakeBucketWithLocation(context.Background(), bucketName, "")
-	obj.PutObject(context.Background(), bucketName, objectName, mustGetHashReader(t, bytes.NewReader([]byte("abcd")), int64(len("abcd")), "", ""), nil)
+	obj.PutObject(context.Background(), bucketName, objectName, mustGetPutObjReader(t, bytes.NewReader([]byte("abcd")), int64(len("abcd")), "", ""), nil, ObjectOptions{})
 
 	// Test with invalid bucket name
 	if err := fs.DeleteObject(context.Background(), "fo", objectName); !isSameType(err, BucketNameInvalid{}) {

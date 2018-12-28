@@ -22,7 +22,15 @@ Disk caching can be enabled by updating the `cache` config settings for Minio se
 },
 ```
 
-The cache settings may also be set through environment variables. When set, environment variables override any `cache` config settings for Minio server. Following example uses `/mnt/drive1`, `/mnt/drive2` ,`/mnt/cache1` ... `/mnt/cache3` for caching, with expiry upto 90 days while excluding all objects under bucket `mybucket` and all objects with '.pdf' as extension while starting a standalone erasure coded setup. Cache max usage is restricted to 80% of disk capacity in this example.
+To update the configuration, use `mc admin config get` command to get the current configuration file for the minio cluster in json format, and save it locally.
+```sh
+$ mc admin config get myminio/ > /tmp/myconfig
+```
+After updating the cache configuration in /tmp/myconfig , use `mc admin config set` command to update the configuration for the cluster.Restart the Minio server to put the changes into effect.
+```sh
+$ mc admin config set myminio < /tmp/myconfig
+```
+The cache settings may also be set through environment variables. When set, environment variables override any `cache` config settings for Minio server. Following example uses `/mnt/drive1`, `/mnt/drive2` ,`/mnt/cache1` ... `/mnt/cache3` for caching, with expiry up to 90 days while excluding all objects under bucket `mybucket` and all objects with '.pdf' as extension while starting a standalone erasure coded setup. Cache max usage is restricted to 80% of disk capacity in this example.
 
 ```bash
 export MINIO_CACHE_DRIVES="/mnt/drive1;/mnt/drive2;/mnt/cache{1...3}"

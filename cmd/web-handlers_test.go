@@ -28,7 +28,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -319,6 +318,8 @@ func testDeleteBucketWebHandler(obj ObjectLayer, instanceType string, t TestErrH
 	}
 
 	bucketName := getRandomBucketName()
+	var opts ObjectOptions
+
 	err = obj.MakeBucketWithLocation(context.Background(), bucketName, "")
 	if err != nil {
 		t.Fatalf("failed to create bucket: %s (%s)", err.Error(), instanceType)
@@ -342,13 +343,13 @@ func testDeleteBucketWebHandler(obj ObjectLayer, instanceType string, t TestErrH
 		{"minio", false, token, "specified bucket minio does not exist"},
 		{bucketName, false, token, ""},
 		{bucketName, true, token, "Bucket not empty"},
-		{bucketName, false, "", "Authentication failed"},
+		{bucketName, false, "", "JWT token missing"},
 	}
 
 	for _, test := range testCases {
 		if test.initWithObject {
 			data := bytes.NewBufferString("hello")
-			_, err = obj.PutObject(context.Background(), test.bucketName, "object", mustGetHashReader(t, data, int64(data.Len()), "", ""), nil)
+			_, err = obj.PutObject(context.Background(), test.bucketName, "object", mustGetPutObjReader(t, data, int64(data.Len()), "", ""), nil, opts)
 			// _, err = obj.PutObject(test.bucketName, "object", int64(data.Len()), data, nil, "")
 			if err != nil {
 				t.Fatalf("could not put object to %s, %s", test.bucketName, err.Error())
@@ -484,7 +485,7 @@ func testListObjectsWebHandler(obj ObjectLayer, instanceType string, t TestErrHa
 
 	data := bytes.Repeat([]byte("a"), objectSize)
 	metadata := map[string]string{"etag": "c9a34cfc85d982698c6ac89f76071abd"}
-	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetHashReader(t, bytes.NewReader(data), int64(len(data)), metadata["etag"], ""), metadata)
+	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetPutObjReader(t, bytes.NewReader(data), int64(len(data)), metadata["etag"], ""), metadata, ObjectOptions{})
 
 	if err != nil {
 		t.Fatalf("Was not able to upload an object, %v", err)
@@ -538,8 +539,8 @@ func testListObjectsWebHandler(obj ObjectLayer, instanceType string, t TestErrHa
 		Statements: []policy.Statement{policy.NewStatement(
 			policy.Allow,
 			policy.NewPrincipal("*"),
-			policy.NewActionSet(policy.GetObjectAction),
-			policy.NewResourceSet(policy.NewResource(bucketName, "*")),
+			policy.NewActionSet(policy.ListBucketAction),
+			policy.NewResourceSet(policy.NewResource(bucketName, "")),
 			condition.NewFunctions(),
 		)},
 	}
@@ -588,14 +589,14 @@ func testRemoveObjectWebHandler(obj ObjectLayer, instanceType string, t TestErrH
 
 	data := bytes.Repeat([]byte("a"), objectSize)
 	metadata := map[string]string{"etag": "c9a34cfc85d982698c6ac89f76071abd"}
-	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetHashReader(t, bytes.NewReader(data), int64(len(data)), metadata["etag"], ""), metadata)
+	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetPutObjReader(t, bytes.NewReader(data), int64(len(data)), metadata["etag"], ""), metadata, ObjectOptions{})
 	if err != nil {
 		t.Fatalf("Was not able to upload an object, %v", err)
 	}
 
 	objectName = "a/object"
 	metadata = map[string]string{"etag": "c9a34cfc85d982698c6ac89f76071abd"}
-	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetHashReader(t, bytes.NewReader(data), int64(len(data)), metadata["etag"], ""), metadata)
+	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetPutObjReader(t, bytes.NewReader(data), int64(len(data)), metadata["etag"], ""), metadata, ObjectOptions{})
 	if err != nil {
 		t.Fatalf("Was not able to upload an object, %v", err)
 	}
@@ -896,7 +897,7 @@ func testUploadWebHandler(obj ObjectLayer, instanceType string, t TestErrHandler
 	}
 
 	var byteBuffer bytes.Buffer
-	err = obj.GetObject(context.Background(), bucketName, objectName, 0, int64(len(content)), &byteBuffer, "")
+	err = obj.GetObject(context.Background(), bucketName, objectName, 0, int64(len(content)), &byteBuffer, "", ObjectOptions{})
 	if err != nil {
 		t.Fatalf("Failed, %v", err)
 	}
@@ -986,7 +987,7 @@ func testDownloadWebHandler(obj ObjectLayer, instanceType string, t TestErrHandl
 
 	content := []byte("temporary file's content")
 	metadata := map[string]string{"etag": "01ce59706106fe5e02e7f55fffda7f34"}
-	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetHashReader(t, bytes.NewReader(content), int64(len(content)), metadata["etag"], ""), metadata)
+	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetPutObjReader(t, bytes.NewReader(content), int64(len(content)), metadata["etag"], ""), metadata, ObjectOptions{})
 	if err != nil {
 		t.Fatalf("Was not able to upload an object, %v", err)
 	}
@@ -1070,6 +1071,7 @@ func TestWebHandlerDownloadZip(t *testing.T) {
 func testWebHandlerDownloadZip(obj ObjectLayer, instanceType string, t TestErrHandler) {
 	apiRouter := initTestWebRPCEndPoint(obj)
 	credentials := globalServerConfig.GetCredential()
+	var opts ObjectOptions
 
 	authorization, err := authenticateURL(credentials.AccessKey, credentials.SecretKey)
 	if err != nil {
@@ -1088,9 +1090,9 @@ func testWebHandlerDownloadZip(obj ObjectLayer, instanceType string, t TestErrHa
 		t.Fatalf("%s : %s", instanceType, err)
 	}
 
-	obj.PutObject(context.Background(), bucket, "a/one", mustGetHashReader(t, strings.NewReader(fileOne), int64(len(fileOne)), "", ""), nil)
-	obj.PutObject(context.Background(), bucket, "a/b/two", mustGetHashReader(t, strings.NewReader(fileTwo), int64(len(fileTwo)), "", ""), nil)
-	obj.PutObject(context.Background(), bucket, "a/c/three", mustGetHashReader(t, strings.NewReader(fileThree), int64(len(fileThree)), "", ""), nil)
+	obj.PutObject(context.Background(), bucket, "a/one", mustGetPutObjReader(t, strings.NewReader(fileOne), int64(len(fileOne)), "", ""), nil, opts)
+	obj.PutObject(context.Background(), bucket, "a/b/two", mustGetPutObjReader(t, strings.NewReader(fileTwo), int64(len(fileTwo)), "", ""), nil, opts)
+	obj.PutObject(context.Background(), bucket, "a/c/three", mustGetPutObjReader(t, strings.NewReader(fileThree), int64(len(fileThree)), "", ""), nil, opts)
 
 	test := func(token string) (int, []byte) {
 		rec := httptest.NewRecorder()
@@ -1175,7 +1177,7 @@ func testWebPresignedGetHandler(obj ObjectLayer, instanceType string, t TestErrH
 
 	data := bytes.Repeat([]byte("a"), objectSize)
 	metadata := map[string]string{"etag": "c9a34cfc85d982698c6ac89f76071abd"}
-	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetHashReader(t, bytes.NewReader(data), int64(len(data)), metadata["etag"], ""), metadata)
+	_, err = obj.PutObject(context.Background(), bucketName, objectName, mustGetPutObjReader(t, bytes.NewReader(data), int64(len(data)), metadata["etag"], ""), metadata, ObjectOptions{})
 	if err != nil {
 		t.Fatalf("Was not able to upload an object, %v", err)
 	}
@@ -1292,7 +1294,7 @@ func testWebGetBucketPolicyHandler(obj ObjectLayer, instanceType string, t TestE
 		},
 	}
 
-	if err = savePolicyConfig(obj, bucketName, bucketPolicy); err != nil {
+	if err = savePolicyConfig(context.Background(), obj, bucketName, bucketPolicy); err != nil {
 		t.Fatal("Unexpected error: ", err)
 	}
 
@@ -1392,7 +1394,7 @@ func testWebListAllBucketPoliciesHandler(obj ObjectLayer, instanceType string, t
 		},
 	}
 
-	if err = savePolicyConfig(obj, bucketName, bucketPolicy); err != nil {
+	if err = savePolicyConfig(context.Background(), obj, bucketName, bucketPolicy); err != nil {
 		t.Fatal("Unexpected error: ", err)
 	}
 
@@ -1506,14 +1508,13 @@ func TestWebCheckAuthorization(t *testing.T) {
 
 	// Register the API end points with XL/FS object layer.
 	apiRouter := initTestWebRPCEndPoint(obj)
+
 	// initialize the server and obtain the credentials and root.
 	// credentials are necessary to sign the HTTP request.
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
+	err = newTestConfig(globalMinioDefaultRegion, obj)
 	if err != nil {
 		t.Fatal("Init Test config failed", err)
 	}
-	// remove the root directory after the test ends.
-	defer os.RemoveAll(rootPath)
 
 	rec := httptest.NewRecorder()
 
@@ -1585,100 +1586,8 @@ func TestWebCheckAuthorization(t *testing.T) {
 	}
 }
 
-// TestWebObjectLayerNotReady - Test RPCs responses when disks are not ready
-func TestWebObjectLayerNotReady(t *testing.T) {
-	// Initialize web rpc endpoint.
-	apiRouter := initTestWebRPCEndPoint(nil)
-
-	// initialize the server and obtain the credentials and root.
-	// credentials are necessary to sign the HTTP request.
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal("Init Test config failed", err)
-	}
-	// remove the root directory after the test ends.
-	defer os.RemoveAll(rootPath)
-
-	rec := httptest.NewRecorder()
-
-	credentials := globalServerConfig.GetCredential()
-	authorization, err := getWebRPCToken(apiRouter, credentials.AccessKey, credentials.SecretKey)
-	if err != nil {
-		t.Fatal("Cannot authenticate", err)
-	}
-
-	// Check if web rpc calls return Server not initialized. ServerInfo, GenerateAuth,
-	// SetAuth and GetAuth are not concerned
-	webRPCs := []string{"StorageInfo", "MakeBucket", "ListBuckets", "ListObjects", "RemoveObject",
-		"GetBucketPolicy", "SetBucketPolicy", "ListAllBucketPolicies"}
-	for _, rpcCall := range webRPCs {
-		args := &AuthArgs{
-			RPCVersion: globalRPCAPIVersion,
-		}
-		reply := &WebGenericRep{}
-		req, nerr := newTestWebRPCRequest("Web."+rpcCall, authorization, args)
-		if nerr != nil {
-			t.Fatalf("Test %s: Failed to create HTTP request: <ERROR> %v", rpcCall, nerr)
-		}
-		apiRouter.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("Test %s: Expected the response status to be 200, but instead found `%d`", rpcCall, rec.Code)
-		}
-		err = getTestWebRPCResponse(rec, &reply)
-		if err == nil {
-			t.Fatalf("Test %s: Should fail", rpcCall)
-		} else {
-			if !strings.EqualFold(err.Error(), errServerNotInitialized.Error()) {
-				t.Fatalf("Test %s: should fail with %s Found error: %v", rpcCall, errServerNotInitialized, err)
-			}
-		}
-	}
-
-	rec = httptest.NewRecorder()
-	// Test authorization of Web.Download
-	req, err := http.NewRequest("GET", "/minio/download/bucket/object?token="+authorization, nil)
-	if err != nil {
-		t.Fatalf("Cannot create upload request, %v", err)
-	}
-	apiRouter.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("Expected the response status to be 503, but instead found `%d`", rec.Code)
-	}
-	resp := string(rec.Body.Bytes())
-	if !strings.EqualFold(resp, errServerNotInitialized.Error()) {
-		t.Fatalf("Unexpected error message, expected: `%s`, found: `%s`", errServerNotInitialized, resp)
-	}
-
-	rec = httptest.NewRecorder()
-	// Test authorization of Web.Upload
-	content := []byte("temporary file's content")
-	req, err = http.NewRequest("PUT", "/minio/upload/bucket/object", nil)
-	req.Header.Set("Authorization", "Bearer "+authorization)
-	req.Header.Set("Content-Length", strconv.Itoa(len(content)))
-	req.Header.Set("x-amz-date", "20160814T114029Z")
-	req.Header.Set("Accept", "*/*")
-	req.Body = ioutil.NopCloser(bytes.NewReader(content))
-	if err != nil {
-		t.Fatalf("Cannot create upload request, %v", err)
-	}
-	apiRouter.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("Expected the response status to be 503, but instead found `%d`", rec.Code)
-	}
-	resp = string(rec.Body.Bytes())
-	if !strings.EqualFold(resp, errServerNotInitialized.Error()) {
-		t.Fatalf("Unexpected error message, expected: `%s`, found: `%s`", errServerNotInitialized, resp)
-	}
-}
-
 // TestWebObjectLayerFaultyDisks - Test Web RPC responses with faulty disks
 func TestWebObjectLayerFaultyDisks(t *testing.T) {
-	root, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(root)
-
 	// Prepare XL backend
 	obj, fsDirs, err := prepareXL16()
 	if err != nil {
@@ -1686,6 +1595,13 @@ func TestWebObjectLayerFaultyDisks(t *testing.T) {
 	}
 	// Executing the object layer tests for XL.
 	defer removeRoots(fsDirs)
+
+	// initialize the server and obtain the credentials and root.
+	// credentials are necessary to sign the HTTP request.
+	err = newTestConfig(globalMinioDefaultRegion, obj)
+	if err != nil {
+		t.Fatal("Init Test config failed", err)
+	}
 
 	bucketName := "mybucket"
 	err = obj.MakeBucketWithLocation(context.Background(), bucketName, "")
@@ -1701,15 +1617,6 @@ func TestWebObjectLayerFaultyDisks(t *testing.T) {
 
 	// Initialize web rpc endpoint.
 	apiRouter := initTestWebRPCEndPoint(obj)
-
-	// initialize the server and obtain the credentials and root.
-	// credentials are necessary to sign the HTTP request.
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal("Init Test config failed", err)
-	}
-	// remove the root directory after the test ends.
-	defer os.RemoveAll(rootPath)
 
 	rec := httptest.NewRecorder()
 

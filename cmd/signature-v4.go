@@ -161,9 +161,6 @@ func compareSignatureV4(sig1, sig2 string) bool {
 //     - http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-HTTPPOSTConstructPolicy.html
 // returns ErrNone if the signature matches.
 func doesPolicySignatureV4Match(formValues http.Header) APIErrorCode {
-	// Access credentials.
-	cred := globalServerConfig.GetCredential()
-
 	// Server region.
 	region := globalServerConfig.GetRegion()
 
@@ -173,9 +170,9 @@ func doesPolicySignatureV4Match(formValues http.Header) APIErrorCode {
 		return ErrMissingFields
 	}
 
-	// Verify if the access key id matches.
-	if credHeader.accessKey != cred.AccessKey {
-		return ErrInvalidAccessKeyID
+	cred, _, s3Err := checkKeyValid(credHeader.accessKey)
+	if s3Err != ErrNone {
+		return s3Err
 	}
 
 	// Get signing key.
@@ -200,14 +197,13 @@ func doesPresignedSignatureMatch(hashedPayload string, r *http.Request, region s
 	if err != nil {
 		return ErrNoSuchKey
 	}
-	return verifier.doesPresignedSignatureMatch(hashedPayload, r)
+	return verifier.doesPresignedSignatureMatch(hashedPayload, r, region)
 }
 
 // doesPresignedSignatureMatch - Verify query headers with presigned signature
 //     - http://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
 // returns ErrNone if the signature matches.
-func (verifier AWSV4Verifier) doesPresignedSignatureMatch(hashedPayload string, r *http.Request) APIErrorCode {
-	cred := verifier.GetCredential()
+func (verifier AWSV4Verifier) doesPresignedSignatureMatch(hashedPayload string, r *http.Request, region string) APIErrorCode {
 	// Copy request
 	req := *r
 
@@ -216,9 +212,10 @@ func (verifier AWSV4Verifier) doesPresignedSignatureMatch(hashedPayload string, 
 	if err != ErrNone {
 		return err
 	}
+	cred := verifier.GetCredential()
 
 	// Verify if the access key id matches.
-	if pSignValues.Credential.accessKey != cred.AccessKey {
+	if pSignValues.Credential.accessKey != verifier.creds.AccessKey {
 		return ErrInvalidAccessKeyID
 	}
 
@@ -227,6 +224,7 @@ func (verifier AWSV4Verifier) doesPresignedSignatureMatch(hashedPayload string, 
 	if errCode != ErrNone {
 		return errCode
 	}
+
 	// Construct new query.
 	query := make(url.Values)
 	if req.URL.Query().Get("X-Amz-Content-Sha256") != "" {
@@ -257,6 +255,12 @@ func (verifier AWSV4Verifier) doesPresignedSignatureMatch(hashedPayload string, 
 
 	// Save other headers available in the request parameters.
 	for k, v := range req.URL.Query() {
+
+		// Handle the metadata in presigned put query string
+		if strings.Contains(strings.ToLower(k), "x-amz-meta-") {
+			query.Set(k, v[0])
+		}
+
 		if strings.HasPrefix(strings.ToLower(k), "x-amz") {
 			continue
 		}
@@ -313,7 +317,7 @@ func (verifier AWSV4Verifier) doesPresignedSignatureMatch(hashedPayload string, 
 // doesSignatureMatch - Verify authorization header with calculated header in accordance with
 //     - http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
 // returns ErrNone if signature matches.
-func (verifier AWSV4Verifier) doesSignatureMatch(hashedPayload string, r *http.Request) APIErrorCode {
+func (verifier AWSV4Verifier) doesSignatureMatch(hashedPayload string, r *http.Request, region string) APIErrorCode {
 	// Copy request.
 	req := *r
 
@@ -332,7 +336,6 @@ func (verifier AWSV4Verifier) doesSignatureMatch(hashedPayload string, r *http.R
 		return errCode
 	}
 
-	// Verify if the access key id matches.
 	if signV4Values.Credential.accessKey != verifier.creds.AccessKey {
 		return ErrInvalidAccessKeyID
 	}
@@ -344,6 +347,7 @@ func (verifier AWSV4Verifier) doesSignatureMatch(hashedPayload string, r *http.R
 			return ErrMissingDateHeader
 		}
 	}
+
 	// Parse date header.
 	t, e := time.Parse(iso8601Format, date)
 	if e != nil {

@@ -77,8 +77,8 @@ Minio支持[RabbitMQ](https://www.rabbitmq.com/)中所有的交换方式，这�
 
 ```
 mc mb myminio/images
-mc events add  myminio/images arn:minio:sqs:us-east-1:1:amqp --suffix .jpg
-mc events list myminio/images
+mc event add  myminio/images arn:minio:sqs:us-east-1:1:amqp --suffix .jpg
+mc event list myminio/images
 arn:minio:sqs:us-east-1:1:amqp s3:ObjectCreated:*,s3:ObjectRemoved:* Filter: suffix=”.jpg”
 ```
 
@@ -183,8 +183,8 @@ Minio支持任何支持MQTT 3.1或3.1.1的MQTT服务器，并且可以通过TCP�
 
 ```
 mc mb myminio/images
-mc events add  myminio/images arn:minio:sqs:us-east-1:1:mqtt --suffix .jpg
-mc events list myminio/images
+mc event add  myminio/images arn:minio:sqs:us-east-1:1:mqtt --suffix .jpg
+mc event list myminio/images
 arn:minio:sqs:us-east-1:1:amqp s3:ObjectCreated:*,s3:ObjectRemoved:* Filter: suffix=”.jpg”
 ```
 
@@ -297,8 +297,8 @@ Minio Server的配置文件默认路径是 ``~/.minio/config.json``。ES配置�
 
 ```
 mc mb myminio/images
-mc events add  myminio/images arn:minio:sqs:us-east-1:1:elasticsearch --suffix .jpg
-mc events list myminio/images
+mc event add  myminio/images arn:minio:sqs:us-east-1:1:elasticsearch --suffix .jpg
+mc event list myminio/images
 arn:minio:sqs:us-east-1:1:elasticsearch s3:ObjectCreated:*,s3:ObjectRemoved:* Filter: suffix=”.jpg”
 ```
 
@@ -389,17 +389,17 @@ $ curl  "http://localhost:9200/minio_events/_search?pretty=true"
 
 安装 [Redis](http://redis.io/download)。为了演示，我们将数据库密码设为"yoursecret"。
 
-这咱通知目标支持两种格式: _namespace_ 和 _access_。
+这种通知目标支持两种格式: _namespace_ 和 _access_。
 
-如果用的是_namespacee_格式，Minio将存储桶里的对象同步成Redis hash中的条目。对于每一个条目，对对应一个存储桶里的对象，其key都被设为"存储桶名称/对象名称"，value都是一个有关这个Minio对象的JSON格式的事件数据。如果对象更新或者删除，hash中对象的条目也会相应的更新或者删除。
+如果用的是_namespacee_格式，Minio将存储桶里的对象同步成Redis hash中的条目。对于每一个条目，对应一个存储桶里的对象，其key都被设为"存储桶名称/对象名称"，value都是一个有关这个Minio对象的JSON格式的事件数据。如果对象更新或者删除，hash中对象的条目也会相应的更新或者删除。
 
-如果使用的是_access_,Minio使用[RPUSH](https://redis.io/commands/rpush)将事件添加到list中。这个list中每一个元素都是一个JSON格式的list,这个list中又有两个元素，第一个元素是时间戳的字符串，第二个元素是一个含有在这个存储桶上进行操作的事件数据的JSON对象。在这种格式下，list中的元素不会更更新或者删除。
+如果使用的是_access_,Minio使用[RPUSH](https://redis.io/commands/rpush)将事件添加到list中。这个list中每一个元素都是一个JSON格式的list,这个list中又有两个元素，第一个元素是时间戳的字符串，第二个元素是一个含有在这个存储桶上进行操作的事件数据的JSON对象。在这种格式下，list中的元素不会更新或者删除。
 
-下面的步骤展示的是如何在`namespace`和`access`格式下使用通知目标。
+下面的步骤展示如何在`namespace`和`access`格式下使用通知目标。
 
 ### 第一步：集成Redis到Minio
 
-Minio Server的配置文件默认路径是 ``~/.minio/config.json``。Redis配置信息是在`notify`这个节点下的`redis`节点下，在这里为你的Redis实例创建配置信息键值对，key是你的Redis的名称，value是下面表格中列列的键值对集合。
+Minio Server的配置文件默认路径是 ``~/.minio/config.json``。Redis配置信息是在`notify`这个节点下的`redis`节点下，在这里为你的Redis实例创建配置信息键值对，key是你的Redis端的名称，value是下面表格中的键值对里面值的集合。
 
 | 参数 | 类型 | 描述 |
 |:---|:---|:---|
@@ -428,7 +428,7 @@ Minio Server的配置文件默认路径是 ``~/.minio/config.json``。Redis配�
 
 ### 第二步: 使用Minio客户端启用bucket通知
 
-我们现在可以在一个叫`images`的存储桶上开启事件通知。一旦有文件被创建或者覆盖，一个新的key会被创建,或者一个已经存在的key就会被更新到之前咱配的redis hash里。如果一个已经存在的对象被删除，这个对应的key也会从hash中删除。因此，这个Redis hash里的行，就映射着`images`存储桶里的对象。
+我们现在可以在一个叫`images`的存储桶上开启事件通知。一旦有文件被创建或者覆盖，一个新的key会被创建,或者一个已经存在的key就会被更新到之前配置好的redis hash里。如果一个已经存在的对象被删除，这个对应的key也会从hash中删除。因此，这个Redis hash里的行，就映射着`images`存储桶里的`.jpg`对象。
 
 要配置这种存储桶通知，我们需要用到前面步骤Minio输出的ARN信息。更多有关ARN的资料，请参考[这里](http://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html)。
 
@@ -436,14 +436,14 @@ Minio Server的配置文件默认路径是 ``~/.minio/config.json``。Redis配�
 
 ```
 mc mb myminio/images
-mc events add  myminio/images arn:minio:sqs:us-east-1:1:redis --suffix .jpg
-mc events list myminio/images
+mc event add  myminio/images arn:minio:sqs:us-east-1:1:redis --suffix .jpg
+mc event list myminio/images
 arn:minio:sqs:us-east-1:1:redis s3:ObjectCreated:*,s3:ObjectRemoved:* Filter: suffix=”.jpg”
 ```
 
 ### 第三步：验证Redis
 
-启动`redis-cli`这个Redis客户端程序来检查Redis中的内容. 运行`monitor`Redis命令。 这将打印在Redis上执行的每个操作。
+启动`redis-cli`这个Redis客户端程序来检查Redis中的内容. 运行`monitor`Redis命令将会输出在Redis上执行的每个命令的。
 
 ```
 redis-cli -a yoursecret
@@ -466,7 +466,7 @@ OK
 1490686879.651061 [0 172.17.0.1:44710] "HSET" "minio_events" "images/myphoto.jpg" "{\"Records\":[{\"eventVersion\":\"2.0\",\"eventSource\":\"minio:s3\",\"awsRegion\":\"us-east-1\",\"eventTime\":\"2017-03-28T07:41:19Z\",\"eventName\":\"s3:ObjectCreated:Put\",\"userIdentity\":{\"principalId\":\"minio\"},\"requestParameters\":{\"sourceIPAddress\":\"127.0.0.1:52234\"},\"responseElements\":{\"x-amz-request-id\":\"14AFFBD1ACE5F632\",\"x-minio-origin-endpoint\":\"http://192.168.86.115:9000\"},\"s3\":{\"s3SchemaVersion\":\"1.0\",\"configurationId\":\"Config\",\"bucket\":{\"name\":\"images\",\"ownerIdentity\":{\"principalId\":\"minio\"},\"arn\":\"arn:aws:s3:::images\"},\"object\":{\"key\":\"myphoto.jpg\",\"size\":2586,\"eTag\":\"5d284463f9da279f060f0ea4d11af098\",\"sequencer\":\"14AFFBD1ACE5F632\"}},\"source\":{\"host\":\"127.0.0.1\",\"port\":\"52234\",\"userAgent\":\"Minio (linux; amd64) minio-go/2.0.3 mc/2017-02-15T17:57:25Z\"}}]}"
 ```
 
-在这我看看到了Minio在`minio_events`这个key上执行了`HSET`命令。
+在这我们可以看到Minio在`minio_events`这个key上执行了`HSET`命令。
 
 如果用的是`access`格式，那么`minio_events`就是一个list,Minio就会调用`RPUSH`添加到list中。这个list的消费者会使用`BLPOP`从list的最左端删除list元素。
 
@@ -534,8 +534,8 @@ Minio服务也支持 [NATS Streaming mode](http://nats.io/documentation/streamin
 
 ```
 mc mb myminio/images
-mc events add  myminio/images arn:minio:sqs:us-east-1:1:nats --suffix .jpg
-mc events list myminio/images
+mc event add  myminio/images arn:minio:sqs:us-east-1:1:nats --suffix .jpg
+mc event list myminio/images
 arn:minio:sqs:us-east-1:1:nats s3:ObjectCreated:*,s3:ObjectRemoved:* Filter: suffix=”.jpg”
 ```
 
@@ -703,18 +703,18 @@ Minio Server的配置文件默认路径是 ``~/.minio/config.json``。PostgreSQL
 
 我们现在可以在一个叫`images`的存储桶上开启事件通知，一旦上有文件上传到存储桶中，PostgreSQL中会insert一条新的记录或者一条已经存在的记录会被update，如果一个存在对象被删除，一条对应的记录也会从PostgreSQL表中删除。因此，PostgreSQL表中的行，对应的就是存储桶里的一个对象。
 
-要配置这种存储桶通知，我们需要用到前面步骤Minio输出的ARN信息。更多有关ARN的资料，请参考[这里](http://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html)。
+要配置这种存储桶通知，我们需要用到前面步骤中Minio输出的ARN信息。更多有关ARN的资料，请参考[这里](http://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html)。
 
-有了`mc`这个工具，这些配置信息很容易就能添加上。假设咱们的Minio服务别名叫`myminio`,可执行下列脚本：
+有了`mc`这个工具，这些配置信息很容易就能添加上。假设Minio服务别名叫`myminio`,可执行下列脚本：
 
 ```
 # Create bucket named `images` in myminio
 mc mb myminio/images
 # Add notification configuration on the `images` bucket using the MySQL ARN. The --suffix argument filters events.
-mc events add myminio/images arn:minio:sqs:us-east-1:1:postgresql --suffix .jpg
+mc event add myminio/images arn:minio:sqs:us-east-1:1:postgresql --suffix .jpg
 # Print out the notification configuration on the `images` bucket.
-mc events list myminio/images
-mc events list myminio/images
+mc event list myminio/images
+mc event list myminio/images
 arn:minio:sqs:us-east-1:1:postgresql s3:ObjectCreated:*,s3:ObjectRemoved:* Filter: suffix=”.jpg”
 ```
 
@@ -805,9 +805,9 @@ Minio Server的配置文件默认路径是 ``~/.minio/config.json``。MySQL配�
 # Create bucket named `images` in myminio
 mc mb myminio/images
 # Add notification configuration on the `images` bucket using the MySQL ARN. The --suffix argument filters events.
-mc events add myminio/images arn:minio:sqs:us-east-1:1:postgresql --suffix .jpg
+mc event add myminio/images arn:minio:sqs:us-east-1:1:postgresql --suffix .jpg
 # Print out the notification configuration on the `images` bucket.
-mc events list myminio/images
+mc event list myminio/images
 arn:minio:sqs:us-east-1:1:postgresql s3:ObjectCreated:*,s3:ObjectRemoved:* Filter: suffix=”.jpg”
 ```
 
@@ -865,8 +865,8 @@ Minio Server的配置文件默认路径是 ``~/.minio/config.json``。参考下�
 
 ```
 mc mb myminio/images
-mc events add  myminio/images arn:minio:sqs:us-east-1:1:kafka --suffix .jpg
-mc events list myminio/images
+mc event add  myminio/images arn:minio:sqs:us-east-1:1:kafka --suffix .jpg
+mc event list myminio/images
 arn:minio:sqs:us-east-1:1:kafka s3:ObjectCreated:*,s3:ObjectRemoved:* Filter: suffix=”.jpg”
 ```
 
@@ -916,13 +916,13 @@ endpoint是监听webhook通知的服务。保存配置文件并重启Minio服务
 ```
 mc mb myminio/images
 mc mb myminio/images-thumbnail
-mc events add myminio/images arn:minio:sqs:us-east-1:1:webhook --events put --suffix .jpg
+mc event add myminio/images arn:minio:sqs:us-east-1:1:webhook --events put --suffix .jpg
 ```
 
 验证事件通知是否配置正确：
 
 ```
-mc events list myminio/images
+mc event list myminio/images
 ```
 
 你应该可以收到如下的响应：

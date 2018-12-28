@@ -21,7 +21,7 @@ minio gateway azure
 Minio Gateway配有嵌入式网络对象浏览器。 将您的Web浏览器指向http://127.0.0.1:9000确保您的服务器已成功启动。
 
 ![截图](https://github.com/minio/minio/blob/master/docs/screenshots/minio-browser-gateway.png?raw=true)
-##使用Minio客户端 `mc`验证
+## 使用Minio客户端 `mc`验证
 `mc` 提供了诸如ls，cat，cp，mirror，diff等UNIX命令的替代方案。它支持文件系统和Amazon S3兼容的云存储服务。
 
 ### 配置 `mc`
@@ -37,11 +37,7 @@ mc ls myazure
 [2017-02-26 22:10:11 PST]     0B test-container1/
 ```
 
-### 已知的限制
-[限制](https://github.com/minio/minio/blob/master/docs/gateway/azure-limitations.md)
-
 ## 了解更多
 - [`mc` 命令行接口](https://docs.minio.io/cn/minio-client-quickstart-guide)
 - [`aws` 命令行接口](https://docs.minio.io/cn/aws-cli-with-minio)
-- [`minfs` 文件系统接口](https://docs.minio.io/cn/minfs-quickstart-guide)
 - [`minio-go` Go SDK](https://docs.minio.io/cn/golang-client-quickstart-guide)

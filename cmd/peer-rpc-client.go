@@ -21,7 +21,6 @@ import (
 	"crypto/tls"
 
 	"github.com/minio/minio/cmd/logger"
-	"github.com/minio/minio/pkg/auth"
 	"github.com/minio/minio/pkg/event"
 	xnet "github.com/minio/minio/pkg/net"
 	"github.com/minio/minio/pkg/policy"
@@ -116,12 +115,30 @@ func (rpcClient *PeerRPCClient) SendEvent(bucketName string, targetID, remoteTar
 	return err
 }
 
-// SetCredentials - calls set credentials RPC.
-func (rpcClient *PeerRPCClient) SetCredentials(credentials auth.Credentials) error {
-	args := SetCredentialsArgs{Credentials: credentials}
+// ReloadFormat - calls reload format RPC.
+func (rpcClient *PeerRPCClient) ReloadFormat(dryRun bool) error {
+	args := ReloadFormatArgs{
+		DryRun: dryRun,
+	}
 	reply := VoidReply{}
 
-	return rpcClient.Call(peerServiceName+".SetCredentials", &args, &reply)
+	return rpcClient.Call(peerServiceName+".ReloadFormat", &args, &reply)
+}
+
+// LoadUsers - calls load users RPC.
+func (rpcClient *PeerRPCClient) LoadUsers() error {
+	args := AuthArgs{}
+	reply := VoidReply{}
+
+	return rpcClient.Call(peerServiceName+".LoadUsers", &args, &reply)
+}
+
+// LoadCredentials - calls load credentials RPC.
+func (rpcClient *PeerRPCClient) LoadCredentials() error {
+	args := AuthArgs{}
+	reply := VoidReply{}
+
+	return rpcClient.Call(peerServiceName+".LoadCredentials", &args, &reply)
 }
 
 // NewPeerRPCClient - returns new peer RPC client.
@@ -166,9 +183,9 @@ func makeRemoteRPCClients(endpoints EndpointList) map[xnet.Host]*PeerRPCClient {
 	peerRPCClientMap := make(map[xnet.Host]*PeerRPCClient)
 	for _, hostStr := range GetRemotePeers(endpoints) {
 		host, err := xnet.ParseHost(hostStr)
-		logger.FatalIf(err, "Unable to parse peer RPC Host", context.Background())
+		logger.FatalIf(err, "Unable to parse peer RPC Host")
 		rpcClient, err := NewPeerRPCClient(host)
-		logger.FatalIf(err, "Unable to parse peer RPC Client", context.Background())
+		logger.FatalIf(err, "Unable to parse peer RPC Client")
 		peerRPCClientMap[*host] = rpcClient
 	}
 

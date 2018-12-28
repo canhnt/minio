@@ -19,19 +19,12 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 )
 
 // Tests undoes and validates if the undoing completes successfully.
 func TestUndoMakeBucket(t *testing.T) {
-	root, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(root)
-
 	nDisks := 16
 	fsDirs, err := getRandomDisks(nDisks)
 	if err != nil {
@@ -65,12 +58,6 @@ func TestUndoMakeBucket(t *testing.T) {
 
 // Tests healing of object.
 func TestHealObjectXL(t *testing.T) {
-	root, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(root)
-
 	nDisks := 16
 	fsDirs, err := getRandomDisks(nDisks)
 	if err != nil {
@@ -88,6 +75,7 @@ func TestHealObjectXL(t *testing.T) {
 	bucket := "bucket"
 	object := "object"
 	data := bytes.Repeat([]byte("a"), 5*1024*1024)
+	var opts ObjectOptions
 
 	err = obj.MakeBucketWithLocation(context.Background(), bucket, "")
 	if err != nil {
@@ -96,14 +84,14 @@ func TestHealObjectXL(t *testing.T) {
 
 	// Create an object with multiple parts uploaded in decreasing
 	// part number.
-	uploadID, err := obj.NewMultipartUpload(context.Background(), bucket, object, nil)
+	uploadID, err := obj.NewMultipartUpload(context.Background(), bucket, object, nil, opts)
 	if err != nil {
 		t.Fatalf("Failed to create a multipart upload - %v", err)
 	}
 
 	var uploadedParts []CompletePart
 	for _, partID := range []int{2, 1} {
-		pInfo, err1 := obj.PutObjectPart(context.Background(), bucket, object, uploadID, partID, mustGetHashReader(t, bytes.NewReader(data), int64(len(data)), "", ""))
+		pInfo, err1 := obj.PutObjectPart(context.Background(), bucket, object, uploadID, partID, mustGetPutObjReader(t, bytes.NewReader(data), int64(len(data)), "", ""), opts)
 		if err1 != nil {
 			t.Fatalf("Failed to upload a part - %v", err1)
 		}
@@ -113,7 +101,7 @@ func TestHealObjectXL(t *testing.T) {
 		})
 	}
 
-	_, err = obj.CompleteMultipartUpload(context.Background(), bucket, object, uploadID, uploadedParts)
+	_, err = obj.CompleteMultipartUpload(context.Background(), bucket, object, uploadID, uploadedParts, ObjectOptions{})
 	if err != nil {
 		t.Fatalf("Failed to complete multipart upload - %v", err)
 	}
@@ -145,6 +133,6 @@ func TestHealObjectXL(t *testing.T) {
 	_, err = obj.HealObject(context.Background(), bucket, object, false)
 	// since majority of xl.jsons are not available, object quorum can't be read properly and error will be errXLReadQuorum
 	if _, ok := err.(InsufficientReadQuorum); !ok {
-		t.Errorf("Expected %v but received %v", InsufficientWriteQuorum{}, err)
+		t.Errorf("Expected %v but received %v", InsufficientReadQuorum{}, err)
 	}
 }

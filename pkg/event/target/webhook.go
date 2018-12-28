@@ -21,7 +21,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -36,6 +39,17 @@ type WebhookArgs struct {
 	Enable   bool           `json:"enable"`
 	Endpoint xnet.URL       `json:"endpoint"`
 	RootCAs  *x509.CertPool `json:"-"`
+}
+
+// Validate WebhookArgs fields
+func (w WebhookArgs) Validate() error {
+	if !w.Enable {
+		return nil
+	}
+	if w.Endpoint.IsEmpty() {
+		return errors.New("endpoint empty")
+	}
+	return nil
 }
 
 // WebhookTarget - Webhook target.
@@ -58,7 +72,7 @@ func (target *WebhookTarget) Send(eventData event.Event) error {
 	}
 	key := eventData.S3.Bucket.Name + "/" + objectName
 
-	data, err := json.Marshal(event.Log{eventData.EventName, key, []event.Event{eventData}})
+	data, err := json.Marshal(event.Log{EventName: eventData.EventName, Key: key, Records: []event.Event{eventData}})
 	if err != nil {
 		return err
 	}
@@ -77,6 +91,7 @@ func (target *WebhookTarget) Send(eventData event.Event) error {
 	}
 
 	// FIXME: log returned error. ignore time being.
+	io.Copy(ioutil.Discard, resp.Body)
 	_ = resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -94,7 +109,7 @@ func (target *WebhookTarget) Close() error {
 // NewWebhookTarget - creates new Webhook target.
 func NewWebhookTarget(id string, args WebhookArgs) *WebhookTarget {
 	return &WebhookTarget{
-		id:   event.TargetID{id, "webhook"},
+		id:   event.TargetID{ID: id, Name: "webhook"},
 		args: args,
 		httpClient: &http.Client{
 			Transport: &http.Transport{

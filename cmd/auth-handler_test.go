@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -342,11 +343,14 @@ func mustNewSignedBadMD5Request(verifier *AWSV4Verifier, method string, urlStr s
 
 // Tests is requested authenticated function, tests replies for s3 errors.
 func TestIsReqAuthenticated(t *testing.T) {
-	path, err := newTestConfig(globalMinioDefaultRegion)
+	objLayer, fsDir, err := prepareFS()
 	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(fsDir)
+	if err = newTestConfig(globalMinioDefaultRegion, objLayer); err != nil {
 		t.Fatalf("unable initialize config file, %s", err)
 	}
-	defer os.RemoveAll(path)
 
 	verifier, err := NewAWSV4Verifier("myuser", "mypassword", globalServerConfig.GetRegion())
 	if err != nil {
@@ -370,39 +374,46 @@ func TestIsReqAuthenticated(t *testing.T) {
 		{mustNewSignedRequest(verifier,"GET", "http://127.0.0.1:9000", 0, nil, t), ErrNone},
 	}
 
+	ctx := context.Background()
 	// Validates all testcases.
 	for i, testCase := range testCases {
-		if s3Error := verifier.IsReqAuthenticated(testCase.req); s3Error != testCase.s3Error {
-			if _, err := ioutil.ReadAll(testCase.req.Body); toAPIErrorCode(err) != testCase.s3Error {
-				t.Fatalf("Test %d: Unexpected S3 error: want %d - got %d (got after reading request %d)", i, testCase.s3Error, s3Error, toAPIErrorCode(err))
+		if s3Error := verifier.isReqAuthenticated(ctx, testCase.req, verifier.GetRegion()); s3Error != testCase.s3Error {
+			if _, err := ioutil.ReadAll(testCase.req.Body); toAPIErrorCode(ctx, err) != testCase.s3Error {
+				t.Fatalf("Test %d: Unexpected S3 error: want %d - got %d (got after reading request %d)", i, testCase.s3Error, s3Error, toAPIErrorCode(ctx, err))
 			}
 		}
 	}
 }
 func TestCheckAdminRequestAuthType(t *testing.T) {
-	path, err := newTestConfig(globalMinioDefaultRegion)
+	objLayer, fsDir, err := prepareFS()
 	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(fsDir)
+
+	if err = newTestConfig(globalMinioDefaultRegion, objLayer); err != nil {
 		t.Fatalf("unable initialize config file, %s", err)
 	}
-	defer os.RemoveAll(path)
 
 	verifier, err := NewAWSV4Verifier("myuser1", "mypassword2", globalMinioDefaultRegion)
 	if err != nil {
 		t.Fatalf("unable create credential, %s", err)
 	}
 
+
 	testCases := []struct {
 		Request *http.Request
 		ErrCode APIErrorCode
 	}{
 		{Request: mustNewRequest("GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrAccessDenied},
-		{Request: mustNewSignedRequest(verifier,"GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrNone},
-		{Request: mustNewSignedV2Request(verifier,"GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrAccessDenied},
-		{Request: mustNewPresignedV2Request(verifier,"GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrAccessDenied},
-		{Request: mustNewPresignedRequest(verifier,"GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrAccessDenied},
+		{Request: mustNewSignedRequest(verifier, "GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrNone},
+		{Request: mustNewSignedV2Request(verifier, "GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrAccessDenied},
+		{Request: mustNewPresignedV2Request(verifier, "GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrAccessDenied},
+		{Request: mustNewPresignedRequest(verifier, "GET", "http://127.0.0.1:9000", 0, nil, t), ErrCode: ErrAccessDenied},
 	}
+	ctx := context.Background()
 	for i, testCase := range testCases {
-		if s3Error := verifier.CheckAdminRequestAuthType(testCase.Request); s3Error != testCase.ErrCode {
+		if s3Error := verifier.checkAdminRequestAuthType(ctx, testCase.Request, globalServerConfig.GetRegion()); s3Error != testCase.ErrCode {
 			t.Errorf("Test %d: Unexpected s3error returned wanted %d, got %d", i, testCase.ErrCode, s3Error)
 		}
 	}

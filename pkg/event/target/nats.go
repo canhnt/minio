@@ -18,6 +18,7 @@ package target
 
 import (
 	"encoding/json"
+	"errors"
 	"net/url"
 
 	"github.com/minio/minio/pkg/event"
@@ -39,10 +40,32 @@ type NATSArgs struct {
 	Streaming    struct {
 		Enable             bool   `json:"enable"`
 		ClusterID          string `json:"clusterID"`
-		ClientID           string `json:"clientID"`
 		Async              bool   `json:"async"`
 		MaxPubAcksInflight int    `json:"maxPubAcksInflight"`
 	} `json:"streaming"`
+}
+
+// Validate NATSArgs fields
+func (n NATSArgs) Validate() error {
+	if !n.Enable {
+		return nil
+	}
+
+	if n.Address.IsEmpty() {
+		return errors.New("empty address")
+	}
+
+	if n.Subject == "" {
+		return errors.New("empty subject")
+	}
+
+	if n.Streaming.Enable {
+		if n.Streaming.ClusterID == "" {
+			return errors.New("empty cluster id")
+		}
+	}
+
+	return nil
 }
 
 // NATSTarget - NATS target.
@@ -66,7 +89,7 @@ func (target *NATSTarget) Send(eventData event.Event) (err error) {
 	}
 	key := eventData.S3.Bucket.Name + "/" + objectName
 
-	data, err := json.Marshal(event.Log{eventData.EventName, key, []event.Event{eventData}})
+	data, err := json.Marshal(event.Log{EventName: eventData.EventName, Key: key, Records: []event.Event{eventData}})
 	if err != nil {
 		return err
 	}
@@ -101,6 +124,7 @@ func (target *NATSTarget) Close() (err error) {
 func NewNATSTarget(id string, args NATSArgs) (*NATSTarget, error) {
 	var natsConn *nats.Conn
 	var stanConn stan.Conn
+	var clientID string
 	var err error
 
 	if args.Streaming.Enable {
@@ -110,12 +134,9 @@ func NewNATSTarget(id string, args NATSArgs) (*NATSTarget, error) {
 		}
 		addressURL := scheme + "://" + args.Username + ":" + args.Password + "@" + args.Address.String()
 
-		clientID := args.Streaming.ClientID
-		if clientID == "" {
-			clientID, err = getNewUUID()
-			if err != nil {
-				return nil, err
-			}
+		clientID, err = getNewUUID()
+		if err != nil {
+			return nil, err
 		}
 
 		connOpts := []stan.Option{stan.NatsURL(addressURL)}
@@ -138,7 +159,7 @@ func NewNATSTarget(id string, args NATSArgs) (*NATSTarget, error) {
 	}
 
 	return &NATSTarget{
-		id:       event.TargetID{id, "nats"},
+		id:       event.TargetID{ID: id, Name: "nats"},
 		args:     args,
 		stanConn: stanConn,
 		natsConn: natsConn,

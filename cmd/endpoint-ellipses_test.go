@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 
@@ -80,6 +81,65 @@ func TestGetDivisibleSize(t *testing.T) {
 			if testCase.result != gotGCD {
 				t.Errorf("Expected %v, got %v", testCase.result, gotGCD)
 			}
+		})
+	}
+}
+
+// Test tests calculating set indexes with ENV override for drive count.
+func TestGetSetIndexesEnvOverride(t *testing.T) {
+	testCases := []struct {
+		args        []string
+		totalSizes  []uint64
+		indexes     [][]uint64
+		envOverride string
+		success     bool
+	}{
+		{
+			[]string{"data{1...64}"},
+			[]uint64{64},
+			[][]uint64{{8, 8, 8, 8, 8, 8, 8, 8}},
+			"8",
+			true,
+		},
+		{
+			[]string{"data{1...60}"},
+			nil,
+			nil,
+			"8",
+			false,
+		},
+		{
+			[]string{"data{1...64}"},
+			nil,
+			nil,
+			"-1",
+			false,
+		},
+		{
+			[]string{"data{1...64}"},
+			nil,
+			nil,
+			"2",
+			false,
+		},
+	}
+
+	for i, testCase := range testCases {
+		t.Run(fmt.Sprintf("Test%d", i+1), func(t *testing.T) {
+			if err := os.Setenv("MINIO_ERASURE_SET_DRIVE_COUNT", testCase.envOverride); err != nil {
+				t.Fatal(err)
+			}
+			gotIndexes, err := getSetIndexes(testCase.args, testCase.totalSizes)
+			if err != nil && testCase.success {
+				t.Errorf("Expected success but failed instead %s", err)
+			}
+			if err == nil && !testCase.success {
+				t.Errorf("Expected failure but passed instead")
+			}
+			if !reflect.DeepEqual(testCase.indexes, gotIndexes) {
+				t.Errorf("Expected %v, got %v", testCase.indexes, gotIndexes)
+			}
+			os.Unsetenv("MINIO_ERASURE_SET_DRIVE_COUNT")
 		})
 	}
 }
@@ -166,6 +226,17 @@ func TestGetSetIndexes(t *testing.T) {
 	}
 }
 
+func getHexSequences(start int, number int, paddinglen int) (seq []string) {
+	for i := start; i <= number; i++ {
+		if paddinglen == 0 {
+			seq = append(seq, fmt.Sprintf("%x", i))
+		} else {
+			seq = append(seq, fmt.Sprintf(fmt.Sprintf("%%0%dx", paddinglen), i))
+		}
+	}
+	return seq
+}
+
 func getSequences(start int, number int, paddinglen int) (seq []string) {
 	for i := start; i <= number; i++ {
 		if paddinglen == 0 {
@@ -227,9 +298,9 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"/export/set",
-							"",
-							getSequences(1, 64, 0),
+							Prefix: "/export/set",
+							Suffix: "",
+							Seq:    getSequences(1, 64, 0),
 						},
 					},
 				},
@@ -245,14 +316,14 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"",
-							"",
-							getSequences(1, 64, 0),
+							Prefix: "",
+							Suffix: "",
+							Seq:    getSequences(1, 64, 0),
 						},
 						{
-							"http://minio",
-							"/export/set",
-							getSequences(2, 3, 0),
+							Prefix: "http://minio",
+							Suffix: "/export/set",
+							Seq:    getSequences(2, 3, 0),
 						},
 					},
 				},
@@ -268,9 +339,9 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"http://minio",
-							".mydomain.net/data",
-							getSequences(1, 64, 0),
+							Prefix: "http://minio",
+							Suffix: ".mydomain.net/data",
+							Seq:    getSequences(1, 64, 0),
 						},
 					},
 				},
@@ -285,14 +356,14 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"",
-							"/data",
-							getSequences(1, 16, 0),
+							Prefix: "",
+							Suffix: "/data",
+							Seq:    getSequences(1, 16, 0),
 						},
 						{
-							"http://rack",
-							".mydomain.minio",
-							getSequences(1, 4, 0),
+							Prefix: "http://rack",
+							Suffix: ".mydomain.minio",
+							Seq:    getSequences(1, 4, 0),
 						},
 					},
 				},
@@ -308,14 +379,14 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"",
-							"",
-							getSequences(0, 1, 0),
+							Prefix: "",
+							Suffix: "",
+							Seq:    getSequences(0, 1, 0),
 						},
 						{
-							"http://minio",
-							".mydomain.net/data",
-							getSequences(0, 15, 0),
+							Prefix: "http://minio",
+							Suffix: ".mydomain.net/data",
+							Seq:    getSequences(0, 15, 0),
 						},
 					},
 				},
@@ -331,9 +402,9 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"http://server1/data",
-							"",
-							getSequences(1, 32, 0),
+							Prefix: "http://server1/data",
+							Suffix: "",
+							Seq:    getSequences(1, 32, 0),
 						},
 					},
 				},
@@ -349,9 +420,9 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"http://server1/data",
-							"",
-							getSequences(1, 32, 2),
+							Prefix: "http://server1/data",
+							Suffix: "",
+							Seq:    getSequences(1, 32, 2),
 						},
 					},
 				},
@@ -367,19 +438,19 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"",
-							"",
-							getSequences(1, 2, 0),
+							Prefix: "",
+							Suffix: "",
+							Seq:    getSequences(1, 2, 0),
 						},
 						{
-							"",
-							"/test",
-							getSequences(1, 64, 0),
+							Prefix: "",
+							Suffix: "/test",
+							Seq:    getSequences(1, 64, 0),
 						},
 						{
-							"http://minio",
-							"/export/set",
-							getSequences(2, 3, 0),
+							Prefix: "http://minio",
+							Suffix: "/export/set",
+							Seq:    getSequences(2, 3, 0),
 						},
 					},
 				},
@@ -396,14 +467,60 @@ func TestParseEndpointSet(t *testing.T) {
 				[]ellipses.ArgPattern{
 					[]ellipses.Pattern{
 						{
-							"",
-							"",
-							getSequences(1, 10, 0),
+							Prefix: "",
+							Suffix: "",
+							Seq:    getSequences(1, 10, 0),
 						},
 						{
-							"/export",
-							"/disk",
-							getSequences(1, 10, 0),
+							Prefix: "/export",
+							Suffix: "/disk",
+							Seq:    getSequences(1, 10, 0),
+						},
+					},
+				},
+				nil,
+				[][]uint64{{10, 10, 10, 10, 10, 10, 10, 10, 10, 10}},
+			},
+			true,
+		},
+		// IPv6 ellipses with hexadecimal expansion
+		{
+			"http://[2001:3984:3989::{1...a}]/disk{1...10}",
+			endpointSet{
+				[]ellipses.ArgPattern{
+					[]ellipses.Pattern{
+						{
+							Prefix: "",
+							Suffix: "",
+							Seq:    getSequences(1, 10, 0),
+						},
+						{
+							Prefix: "http://[2001:3984:3989::",
+							Suffix: "]/disk",
+							Seq:    getHexSequences(1, 10, 0),
+						},
+					},
+				},
+				nil,
+				[][]uint64{{10, 10, 10, 10, 10, 10, 10, 10, 10, 10}},
+			},
+			true,
+		},
+		// IPv6 ellipses with hexadecimal expansion with 3 position numerics.
+		{
+			"http://[2001:3984:3989::{001...00a}]/disk{1...10}",
+			endpointSet{
+				[]ellipses.ArgPattern{
+					[]ellipses.Pattern{
+						{
+							Prefix: "",
+							Suffix: "",
+							Seq:    getSequences(1, 10, 0),
+						},
+						{
+							Prefix: "http://[2001:3984:3989::",
+							Suffix: "]/disk",
+							Seq:    getHexSequences(1, 10, 3),
 						},
 					},
 				},

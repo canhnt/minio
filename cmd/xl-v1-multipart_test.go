@@ -18,20 +18,12 @@ package cmd
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 )
 
 // Tests cleanup multipart uploads for erasure coded backend.
 func TestXLCleanupStaleMultipartUploads(t *testing.T) {
-	// Initialize configuration
-	root, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatalf("%s", err)
-	}
-	defer os.RemoveAll(root)
-
 	// Create an instance of xl backend
 	obj, fsDirs, err := prepareXL16()
 	if err != nil {
@@ -48,9 +40,10 @@ func TestXLCleanupStaleMultipartUploads(t *testing.T) {
 
 	bucketName := "bucket"
 	objectName := "object"
+	var opts ObjectOptions
 
 	obj.MakeBucketWithLocation(context.Background(), bucketName, "")
-	uploadID, err := obj.NewMultipartUpload(context.Background(), bucketName, objectName, nil)
+	uploadID, err := obj.NewMultipartUpload(context.Background(), bucketName, objectName, nil, opts)
 	if err != nil {
 		t.Fatal("Unexpected err: ", err)
 	}

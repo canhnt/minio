@@ -18,14 +18,10 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
+	"errors"
 	"os"
-	"path/filepath"
-	"time"
 
-	"github.com/minio/minio/cmd/logger"
+	"io/ioutil"
 )
 
 // localAdminClient - represents admin operation to be executed locally.
@@ -49,16 +45,6 @@ func (lc localAdminClient) ReInitFormat(dryRun bool) error {
 		return errServerNotInitialized
 	}
 	return objectAPI.ReloadFormat(context.Background(), dryRun)
-}
-
-// ListLocks - Fetches lock information from local lock instrumentation.
-func (lc localAdminClient) ListLocks(bucket, prefix string, duration time.Duration) ([]VolumeLockInfo, error) {
-	objectAPI := newObjectLayerFn()
-	if objectAPI == nil {
-		return nil, errServerNotInitialized
-	}
-
-	return objectAPI.ListLocks(context.Background(), bucket, prefix, duration)
 }
 
 // ServerInfo - Returns the server info of this server.
@@ -88,36 +74,39 @@ func (lc localAdminClient) ServerInfo() (sid ServerInfoData, e error) {
 	}, nil
 }
 
-// GetConfig - returns config.json of the local server.
-func (lc localAdminClient) GetConfig() ([]byte, error) {
-	if globalServerConfig == nil {
-		return nil, fmt.Errorf("config not present")
+// StartProfiling - starts profiling on the local server.
+func (lc localAdminClient) StartProfiling(profiler string) error {
+	if globalProfiler != nil {
+		globalProfiler.Stop()
+	}
+	prof, err := startProfiler(profiler, "")
+	if err != nil {
+		return err
+	}
+	globalProfiler = prof
+	return nil
+}
+
+// DownloadProfilingData - stops and returns profiling data of the local server.
+func (lc localAdminClient) DownloadProfilingData() ([]byte, error) {
+	if globalProfiler == nil {
+		return nil, errors.New("profiler not enabled")
 	}
 
-	return json.Marshal(globalServerConfig)
-}
+	profilerPath := globalProfiler.Path()
 
-// WriteTmpConfig - writes config file content to a temporary file on
-// the local server.
-func (lc localAdminClient) WriteTmpConfig(tmpFileName string, configBytes []byte) error {
-	tmpConfigFile := filepath.Join(getConfigDir(), tmpFileName)
-	err := ioutil.WriteFile(tmpConfigFile, configBytes, 0666)
-	reqInfo := (&logger.ReqInfo{}).AppendTags("tmpConfigFile", tmpConfigFile)
-	ctx := logger.SetReqInfo(context.Background(), reqInfo)
-	logger.LogIf(ctx, err)
-	return err
-}
+	// Stop the profiler
+	globalProfiler.Stop()
 
-// CommitConfig - Move the new config in tmpFileName onto config.json
-// on a local node.
-func (lc localAdminClient) CommitConfig(tmpFileName string) error {
-	configFile := getConfigFile()
-	tmpConfigFile := filepath.Join(getConfigDir(), tmpFileName)
+	profilerFile, err := os.Open(profilerPath)
+	if err != nil {
+		return nil, err
+	}
 
-	err := os.Rename(tmpConfigFile, configFile)
-	reqInfo := (&logger.ReqInfo{}).AppendTags("tmpConfigFile", tmpConfigFile)
-	reqInfo.AppendTags("configFile", configFile)
-	ctx := logger.SetReqInfo(context.Background(), reqInfo)
-	logger.LogIf(ctx, err)
-	return err
+	data, err := ioutil.ReadAll(profilerFile)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }

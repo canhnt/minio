@@ -1,154 +1,335 @@
 # Deploy Minio on Kubernetes [![Slack](https://slack.minio.io/slack?type=svg)](https://slack.minio.io) [![Go Report Card](https://goreportcard.com/badge/minio/minio)](https://goreportcard.com/report/minio/minio) [![Docker Pulls](https://img.shields.io/docker/pulls/minio/minio.svg?maxAge=604800)](https://hub.docker.com/r/minio/minio/) [![codecov](https://codecov.io/gh/minio/minio/branch/master/graph/badge.svg)](https://codecov.io/gh/minio/minio)
 
-Kubernetes concepts like Deployments and StatefulSets provide perfect platform to deploy Minio server in standalone, distributed or shared mode. There are multiple options to deploy Minio on Kubernetes, you can choose the one that suits you the most.
+Kubernetes concepts like Deployments and StatefulSets provide perfect platform to deploy Minio server in standalone, distributed or gateway mode. There are multiple options to deploy Minio on Kubernetes, you can choose the one that best suits your requirements.
 
-- Minio [Helm](https://helm.sh) Chart offers a customizable and easy Minio deployment, with a single command. Read more about Minio Helm deployment [here](#prerequisites).
+- Helm Chart: Minio Helm Chart offers customizable and easy Minio deployment with a single command. Refer [Minio Helm Chart repository documentation](https://github.com/helm/charts/tree/master/stable/minio) for more details.
 
-- You can also explore Kubernetes [Minio example](https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes-yaml/README.md) to deploy Minio using `.yaml` files.
+- YAML File: Minio can be deployed with `yaml` files via `kubectl`. This document outlines steps required to deploy Minio using `yaml` files.
 
-- If you'd like to get started with Minio on Kubernetes without having to create a real container cluster, you can also [deploy Minio locally](https://raw.githubusercontent.com/minio/minio/master/docs/orchestration/minikube/README.md) with MiniKube.
+## Table of Contents
 
-<a name="prerequisites"></a>
-## 1. Prerequisites
+- [Prerequisites](#Prerequisites)
+- [Minio Standalone Server Deployment](#minio-standalone-server-deployment)
+- [Minio Distributed Server Deployment](#minio-distributed-server-deployment)
+- [Minio GCS Gateway Deployment](#minio-gcs-gateway-deployment)
+- [Monitoring Minio in Kubernetes](#monitoring-minio)
 
-* Kubernetes 1.4+ with Beta APIs enabled for default standalone mode.
-* Kubernetes 1.5+ with Beta APIs enabled to run Minio in [distributed mode](#distributed-minio).
-* PV provisioner support in the underlying infrastructure.
-* Helm package manager [installed](https://github.com/kubernetes/helm#install) on your Kubernetes cluster.
+<a name="Prerequisites"></a>
 
-## 2. Deploy Minio using Helm Chart
+## Prerequisites
 
-Install Minio chart by
+To run this example, you need Kubernetes version >=1.4 cluster installed and running, and that you have installed the [`kubectl`](https://kubernetes.io/docs/tasks/kubectl/install/) command line tool in your path. Please see the [getting started guides](https://kubernetes.io/docs/getting-started-guides/) for installation instructions for your platform.
 
-```bash
-$ helm install stable/minio
-```
-Above command deploys Minio on the Kubernetes cluster in the default configuration. Below section lists all the configurable parameters of the Minio chart and their default values.
+<a name="minio-standalone-server-deployment"></a>
 
-### Configuration
+## Minio Standalone Server Deployment
 
-| Parameter                  | Description                         | Default                                                 |
-|----------------------------|-------------------------------------|---------------------------------------------------------|
-| `image`                    | Minio image name                    | `minio/minio`                                           |
-| `imageTag`                 | Minio image tag. Possible values listed [here](https://hub.docker.com/r/minio/minio/tags/).| `RELEASE.2018-06-29T02-11-29Z`|
-| `imagePullPolicy`          | Image pull policy                   | `Always`                                                |
-| `mode`                     | Minio server mode (`standalone`, `shared` or `distributed`)| `standalone`                     |
-| `numberOfNodes`            | Number of nodes (applicable only for Minio distributed mode). Should be 4 <= x <= 16 | `4`    |
-| `accessKey`                | Default access key                  | `AKIAIOSFODNN7EXAMPLE`                                  |
-| `secretKey`                | Default secret key                  | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`              |
-| `configPath`               | Default config file location        | `~/.minio`                                              |
-| `mountPath`                | Default mount location for persistent drive| `/export`                                        |
-| `serviceType`              | Kubernetes service type             | `LoadBalancer`                                          |
-| `servicePort`              | Kubernetes port where service is exposed| `9000`                                              |
-| `persistence.enabled`      | Use persistent volume to store data | `true`                                                  |
-| `persistence.size`         | Size of persistent volume claim     | `10Gi`                                                  |
-| `persistence.storageClass` | Type of persistent volume claim     | `generic`                                               |
-| `persistence.accessMode`   | ReadWriteOnce or ReadOnly           | `ReadWriteOnce`                                         |
-| `resources`                | CPU/Memory resource requests/limits | Memory: `256Mi`, CPU: `100m`                            |
+The following section describes the process to deploy standalone [Minio](https://minio.io/) server on Kubernetes. The deployment uses the [official Minio Docker image](https://hub.docker.com/r/minio/minio/~/dockerfile/) from Docker Hub.
 
-You can specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. For example,
+This section uses following core components of Kubernetes:
 
-```bash
-$ helm install --name my-release \
-  --set persistence.size=100Gi \
-    stable/minio
+- [_Pods_](https://kubernetes.io/docs/user-guide/pods/)
+- [_Services_](https://kubernetes.io/docs/user-guide/services/)
+- [_Deployments_](https://kubernetes.io/docs/user-guide/deployments/)
+- [_Persistent Volume Claims_](https://kubernetes.io/docs/user-guide/persistent-volumes/#persistentvolumeclaims)
+
+### Standalone Quickstart
+
+Run the below commands to get started quickly
+
+```sh
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-standalone-pvc.yaml?raw=true
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-standalone-deployment.yaml?raw=true
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-standalone-service.yaml?raw=true
 ```
 
-The above command deploys Minio server with a 100Gi backing persistent volume.
+### Create Persistent Volume Claim
 
-Alternately, you can provide a YAML file that specifies parameter values while installing the chart. For example,
+Minio needs persistent storage to store objects. If there is no persistent storage, the data stored in Minio instance will be stored in the container file system and will be wiped off as soon as the container restarts.
 
-```bash
-$ helm install --name my-release -f values.yaml stable/minio
+Create a persistent volume claim (PVC) to request storage for the Minio instance. Kubernetes looks out for PVs matching the PVC request in the cluster and binds it to the PVC automatically. Create the PersistentVolumeClaim 
+
+
+```sh
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-standalone-pvc.yaml?raw=true
+persistentvolumeclaim "minio-pv-claim" created
 ```
 
-### Distributed Minio
+### Create Minio Deployment
 
-This chart provisions a Minio server in standalone mode, by default. To provision Minio server in [distributed mode](https://docs.minio.io/docs/distributed-minio-quickstart-guide), set the `mode` field to `distributed`,
+A deployment encapsulates replica sets and pods. If a pod goes down, replication controller makes sure another pod comes up automatically. This way you won’t need to bother about pod failures and will have a stable Minio service available. Create the Deployment using the following command
 
-```bash
-$ helm install --set mode=distributed stable/minio
+```sh
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-standalone-deployment.yaml?raw=true
+deployment "minio-deployment" created
 ```
 
-This provisions Minio server in distributed mode with 4 nodes. To change the number of nodes in your distributed Minio server, set the `numberOfNodes` field,
+### Create Minio Service
 
-```bash
-$ helm install --set mode=distributed,numberOfNodes=8 stable/minio
+Now that you have a Minio deployment running, you may either want to access it internally (within the cluster) or expose it as a Service onto an external (outside of your cluster, maybe public internet) IP address, depending on your use case. You can achieve this using Services. There are 3 major service types — default type is ClusterIP, which exposes a service to connection from inside the cluster. NodePort and LoadBalancer are two types that expose services to external traffic.
+
+In this example, we expose the Minio Deployment by creating a LoadBalancer service. Create the Minio service using the following command
+
+```sh
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-standalone-service.yaml?raw=true
+service "minio-service" created
 ```
 
-This provisions Minio server in distributed mode with 8 nodes. Note that the `numberOfNodes` value should be an integer between 4 and 16 (inclusive).
+The `LoadBalancer` service takes couple of minutes to launch. To check if the service was created successfully, run the command
 
-#### StatefulSet [limitations](http://kubernetes.io/docs/concepts/abstractions/controllers/statefulsets/#limitations) applicable to distributed Minio
-
-* StatefulSets need persistent storage, so the `persistence.enabled` flag is ignored when `mode` is set to `distributed`.
-* When uninstalling a distributed Minio release, you'll need to manually delete volumes associated with the StatefulSet.
-
-### Shared Minio
-
-To provision Minio servers in [shared mode](https://github.com/minio/minio/blob/master/docs/shared-backend/README.md), set the `mode` field to `shared`,
-
-```bash
-$ helm install --set mode=shared stable/minio
+```sh
+kubectl get svc minio-service
+NAME            CLUSTER-IP     EXTERNAL-IP       PORT(S)          AGE
+minio-service   10.55.248.23   104.199.249.165   9000:31852/TCP   1m
 ```
 
-This provisions 4 Minio server nodes backed by single storage. To change the number of nodes in your shared Minio deployment, set the `numberOfNodes` field,
+### Update existing Minio Deployment
 
-```bash
-$ helm install --set mode=shared,numberOfNodes=8 stable/minio
+You can update an existing Minio deployment to use a newer Minio release. To do this, use the `kubectl set image` command:
+
+```sh
+kubectl set image deployment/minio-deployment minio=<replace-with-new-minio-image>
 ```
 
-This provisions Minio server in shared mode with 8 nodes.
+Kubernetes will restart the deployment to update the image. You will get a message as shown below, on successful update:
 
-### Persistence
-
-This chart provisions a PersistentVolumeClaim and mounts corresponding persistent volume to default location `/export`. You'll need physical storage available in the Kubernetes cluster for this to work. If you'd rather use `emptyDir`, disable PersistentVolumeClaim by:
-
-```bash
-$ helm install --set persistence.enabled=false stable/minio
+```
+deployment "minio-deployment" image updated
 ```
 
-> *"An emptyDir volume is first created when a Pod is assigned to a Node, and exists as long as that Pod is running on that node. When a Pod is removed from a node for any reason, the data in the emptyDir is deleted forever."*
+### Standalone Resource cleanup
 
-## 3. Updating Minio Release using Helm
+You can cleanup the cluster using
 
-You can update an existing Minio Helm Release to use a newer Minio Docker image. To do this, use the `helm upgrade` command:
+```sh
+kubectl delete deployment minio \
+&& kubectl delete pvc minio-pv-claim \
+&& kubectl delete svc minio-service
+```
 
-```bash
-$ helm upgrade --set imageTag=<replace-with-minio-docker-image-tag> <helm-release-name> stable/minio
+<a name="minio-distributed-server-deployment"></a>
+
+## Minio Distributed Server Deployment
+
+The following document describes the process to deploy [distributed Minio](https://docs.minio.io/docs/distributed-minio-quickstart-guide) server on Kubernetes. This example uses the [official Minio Docker image](https://hub.docker.com/r/minio/minio/~/dockerfile/) from Docker Hub.
+
+This example uses following core components of Kubernetes:
+
+- [_Pods_](https://kubernetes.io/docs/concepts/workloads/pods/pod/)
+- [_Services_](https://kubernetes.io/docs/concepts/services-networking/service/)
+- [_Statefulsets_](https://kubernetes.io/docs/tutorials/stateful-application/basic-stateful-set/)
+
+### Distributed Quickstart
+
+Run the below commands to get started quickly
+
+```sh
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-distributed-headless-service.yaml?raw=true
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-distributed-statefulset.yaml?raw=true
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-distributed-service.yaml?raw=true
+```
+
+### Create Minio Headless Service
+
+Headless Service controls the domain within which StatefulSets are created. The domain managed by this Service takes the form: `$(service name).$(namespace).svc.cluster.local` (where “cluster.local” is the cluster domain), and the pods in this domain take the form: `$(pod-name-{i}).$(service name).$(namespace).svc.cluster.local`. This is required to get a DNS resolvable URL for each of the pods created within the Statefulset. Create the Headless Service using the following command
+
+```sh
+$ kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-distributed-headless-service.yaml?raw=true
+service "minio" created
+```
+
+### Create Minio Statefulset
+
+A StatefulSet provides a deterministic name and a unique identity to each pod, making it easy to deploy stateful distributed applications. To launch distributed Minio you need to pass drive locations as parameters to the minio server command. Then, you’ll need to run the same command on all the participating pods. StatefulSets offer a perfect way to handle this requirement. Create the Statefulset using the following command
+
+```sh
+$ kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-distributed-statefulset.yaml?raw=true
+statefulset "minio" created
+```
+
+### Create Minio Service
+
+Now that you have a Minio statefulset running, you may either want to access it internally (within the cluster) or expose it as a Service onto an external (outside of your cluster, maybe public internet) IP address, depending on your use case. You can achieve this using Services. There are 3 major service types — default type is ClusterIP, which exposes a service to connection from inside the cluster. NodePort and LoadBalancer are two types that expose services to external traffic. Create the Minio service using the following command
+
+```sh
+$ kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-distributed-service.yaml?raw=true
+service "minio-service" created
+```
+
+The `LoadBalancer` service takes couple of minutes to launch. To check if the service was created successfully, run the command
+
+```sh
+$ kubectl get svc minio-service
+NAME            CLUSTER-IP     EXTERNAL-IP       PORT(S)          AGE
+minio-service   10.55.248.23   104.199.249.165   9000:31852/TCP   1m
+```
+
+### Update existing Minio StatefulSet
+
+You can update an existing Minio StatefulSet to use a newer Minio release. To do this, use the `kubectl patch statefulset` command:
+
+```sh
+kubectl patch statefulset minio --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/image", "value":"<replace-with-new-minio-image>"}]'
 ```
 
 On successful update, you should see the output below
 
-```bash
-Release "your-helm-release" has been upgraded. Happy Helming!
+```
+statefulset "minio" patched
 ```
 
-## 4. Uninstalling the Chart
+Then delete all the pods in your StatefulSet one by one as shown below. Kubernetes will restart those pods for you, using the new image.
 
-Assuming your release is named as `my-release`, delete it using the command:
-
-```bash
-$ helm delete my-release
+```sh
+kubectl delete minio-0
 ```
 
-The command removes all the Kubernetes components associated with the chart and deletes the release.
+### Resource cleanup
 
-### Notes
-
-* An instance of a chart running in a Kubernetes cluster is called a release. Helm automatically assigns a unique release name after installing the chart. You can also set your preferred name by:
-
-```bash
-$ helm install --name my-release stable/minio
+You can cleanup the cluster using
+```sh
+kubectl delete statefulset minio \
+&& kubectl delete svc minio \
+&& kubectl delete svc minio-service
 ```
 
-* To override the default keys, pass the access and secret keys as arguments to helm install.
+### Deploying on cluster nodes with local host path
 
-```bash
-$ helm install --set accessKey=myaccesskey,secretKey=mysecretkey \
-    stable/minio
+If your cluster does not have a storage solution or PV abstraction, you must explicitly define what nodes you wish to run Minio on, and define a homogeneous path to a local fast block device available on every host.
+
+This must be changed in the example daemonset: [minio-distributed-daemonset.yaml](minio-distributed-daemonset.yaml)
+
+Specifically the hostpath:
+```yaml
+        hostPath:
+          path: /data/minio/
 ```
 
-### Explore Further
+And the list of hosts:
+```yaml
+        - http://hostname1:9000/data/minio
+        - http://hostname2:9000/data/minio
+        - http://hostname3:9000/data/minio
+        - http://hostname4:9000/data/minio
+```
+
+Once deployed, tag the defined host with the `minio-server=true` label:
+
+```bash
+kubectl label node hostname1  -l minio-server=true
+kubectl label node hostname2  -l minio-server=true
+kubectl label node hostname3  -l minio-server=true
+kubectl label node hostname4  -l minio-server=true
+```
+
+<a name="minio-gcs-gateway-deployment"></a>
+
+## Minio GCS Gateway Deployment
+
+The following section describes the process to deploy [Minio](https://minio.io/) GCS Gateway on Kubernetes. The deployment uses the [official Minio Docker image](https://hub.docker.com/r/minio/minio/~/dockerfile/) from Docker Hub.
+
+This section uses following core components of Kubernetes:
+
+- [_Secrets_](https://kubernetes.io/docs/concepts/configuration/secret/)
+- [_Services_](https://kubernetes.io/docs/user-guide/services/)
+- [_Deployments_](https://kubernetes.io/docs/user-guide/deployments/)
+
+### GCS Gateway Quickstart
+
+Create the Google Cloud Service credentials file using the steps mentioned [here](https://github.com/minio/minio/blob/master/docs/gateway/gcs.md#create-service-account-key-for-gcs-and-get-the-credentials-file). 
+
+Use the path of file generated above to create a Kubernetes `secret`.
+
+```sh
+kubectl create secret generic gcs-credentials --from-file=/path/to/gcloud/credentials/application_default_credentials.json
+```
+
+Then download the `minio-gcs-gateway-deployment.yaml` file
+
+```sh
+wget https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-gcs-gateway-deployment.yaml?raw=true
+```
+
+Update the section `gcp_project_id` with your GCS project ID. Then run
+
+```sh
+kubectl create -f minio-gcs-gateway-deployment.yaml
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-gcs-gateway-service.yaml?raw=true
+```
+
+### Create GCS Credentials Secret
+
+A `secret` is intended to hold sensitive information, such as passwords, OAuth tokens, and ssh keys. Putting this information in a secret is safer and more flexible than putting it verbatim in a pod definition or in a docker image.
+
+Create the Google Cloud Service credentials file using the steps mentioned [here](https://github.com/minio/minio/blob/master/docs/gateway/gcs.md#create-service-account-key-for-gcs-and-get-the-credentials-file). 
+
+Use the path of file generated above to create a Kubernetes `secret`.
+
+```sh
+kubectl create secret generic gcs-credentials --from-file=/path/to/gcloud/credentials/application_default_credentials.json
+```
+
+### Create Minio GCS Gateway Deployment
+
+A deployment encapsulates replica sets and pods — so, if a pod goes down, replication controller makes sure another pod comes up automatically. This way you won’t need to bother about pod failures and will have a stable Minio service available.
+
+Minio Gateway uses GCS as its storage backend and need to use a GCP `projectid` to identify your credentials. Update the section `gcp_project_id` with your
+GCS project ID. Create the Deployment using the following command
+
+```sh
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-gcs-gateway-deployment.yaml?raw=true
+deployment "minio-deployment" created
+```
+
+### Create Minio LoadBalancer Service
+
+Now that you have a Minio deployment running, you may either want to access it internally (within the cluster) or expose it as a Service onto an external (outside of your cluster, maybe public internet) IP address, depending on your use case. You can achieve this using Services. There are 3 major service types — default type is ClusterIP, which exposes a service to connection from inside the cluster. NodePort and LoadBalancer are two types that expose services to external traffic. Create the Minio service using the following command
+
+```sh
+kubectl create -f https://github.com/minio/minio/blob/master/docs/orchestration/kubernetes/minio-gcs-gateway-service.yaml?raw=true
+service "minio-service" created
+```
+
+The `LoadBalancer` service takes couple of minutes to launch. To check if the service was created successfully, run the command
+
+```sh
+kubectl get svc minio-service
+NAME            CLUSTER-IP     EXTERNAL-IP       PORT(S)          AGE
+minio-service   10.55.248.23   104.199.249.165   9000:31852/TCP   1m
+```
+
+### Update Existing Minio GCS Deployment
+
+You can update an existing Minio deployment to use a newer Minio release. To do this, use the `kubectl set image` command:
+
+```sh
+kubectl set image deployment/minio-deployment minio=<replace-with-new-minio-image>
+```
+
+Kubernetes will restart the deployment to update the image. You will get a message as shown below, on successful update:
+
+```
+deployment "minio-deployment" image updated
+```
+
+### GCS Gateway Resource Cleanup
+
+You can cleanup the cluster using
+
+```sh
+kubectl delete deployment minio-deployment \
+&&  kubectl delete secret gcs-credentials 
+```
+
+<a name="monitoring-minio"></a>
+
+## Monitoring Minio in Kubernetes
+
+Minio server exposes un-authenticated readiness and liveness endpoints so Kubernetes can natively identify unhealthy Minio containers. Minio also exposes Prometheus compatible data on a different endpoint to enable Prometheus users to natively monitor their Minio deployments.
+
+_Note_ : Readiness check is not allowed in distributed Minio deployment. This is because Kubernetes doesn't allow any traffic to containers whose Readiness checks fail, and in a distributed setup, Minio server can't respond to Readiness checks until all the nodes are reachable. So, Liveness checks are recommended native Kubernetes monitoring approach for distributed Minio StatefulSets. Read more about Kubernetes recommendations for [container probes](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes).
+
+## Explore Further
 - [Minio Erasure Code QuickStart Guide](https://docs.minio.io/docs/minio-erasure-code-quickstart-guide)
 - [Kubernetes Documentation](https://kubernetes.io/docs/home/)
 - [Helm package manager for kubernetes](https://helm.sh/)

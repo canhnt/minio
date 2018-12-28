@@ -17,9 +17,11 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"testing"
 
+	"github.com/minio/minio/cmd/crypto"
 	"github.com/minio/minio/pkg/hash"
 )
 
@@ -51,12 +53,11 @@ var toAPIErrorCodeTests = []struct {
 	{err: errSignatureMismatch, errCode: ErrSignatureDoesNotMatch},
 
 	// SSE-C errors
-	{err: errInsecureSSERequest, errCode: ErrInsecureSSECustomerRequest},
-	{err: errInvalidSSEAlgorithm, errCode: ErrInvalidSSECustomerAlgorithm},
-	{err: errMissingSSEKey, errCode: ErrMissingSSECustomerKey},
-	{err: errInvalidSSEKey, errCode: ErrInvalidSSECustomerKey},
-	{err: errMissingSSEKeyMD5, errCode: ErrMissingSSECustomerKeyMD5},
-	{err: errSSEKeyMD5Mismatch, errCode: ErrSSECustomerKeyMD5Mismatch},
+	{err: crypto.ErrInvalidCustomerAlgorithm, errCode: ErrInvalidSSECustomerAlgorithm},
+	{err: crypto.ErrMissingCustomerKey, errCode: ErrMissingSSECustomerKey},
+	{err: crypto.ErrInvalidCustomerKey, errCode: ErrInvalidSSECustomerKey},
+	{err: crypto.ErrMissingCustomerKeyMD5, errCode: ErrMissingSSECustomerKeyMD5},
+	{err: crypto.ErrCustomerKeyMD5Mismatch, errCode: ErrSSECustomerKeyMD5Mismatch},
 	{err: errObjectTampered, errCode: ErrObjectTampered},
 
 	{err: nil, errCode: ErrNone},
@@ -64,8 +65,9 @@ var toAPIErrorCodeTests = []struct {
 }
 
 func TestAPIErrCode(t *testing.T) {
+	ctx := context.Background()
 	for i, testCase := range toAPIErrorCodeTests {
-		errCode := toAPIErrorCode(testCase.err)
+		errCode := toAPIErrorCode(ctx, testCase.err)
 		if errCode != testCase.errCode {
 			t.Errorf("Test %d: Expected error code %d, got %d", i+1, testCase.errCode, errCode)
 		}

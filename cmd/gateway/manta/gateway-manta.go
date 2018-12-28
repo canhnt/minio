@@ -35,7 +35,6 @@ import (
 	minio "github.com/minio/minio/cmd"
 	"github.com/minio/minio/cmd/logger"
 	"github.com/minio/minio/pkg/auth"
-	"github.com/minio/minio/pkg/hash"
 )
 
 // stor is a namespace within manta where you store any documents that are deemed as private
@@ -109,7 +108,7 @@ EXAMPLES:
 
 	minio.RegisterGatewayCommand(cli.Command{
 		Name:               mantaBackend,
-		Usage:              "Manta Object Storage.",
+		Usage:              "Manta Object Storage",
 		Action:             mantaGatewayMain,
 		CustomHelpTemplate: mantaGatewayTemplate,
 		HideHelpCommand:    true,
@@ -117,12 +116,16 @@ EXAMPLES:
 }
 
 func mantaGatewayMain(ctx *cli.Context) {
-	// Validate gateway arguments.
-	host := ctx.Args().First()
-	// Validate gateway arguments.
-	logger.FatalIf(minio.ValidateGatewayArguments(ctx.GlobalString("address"), host), "Invalid argument")
+	args := ctx.Args()
+	if !ctx.Args().Present() {
+		args = cli.Args{"https://us-east.manta.joyent.com"}
+	}
 
-	minio.StartGateway(ctx, &Manta{host})
+	// Validate gateway arguments.
+	logger.FatalIf(minio.ValidateGatewayArguments(ctx.GlobalString("address"), args.First()), "Invalid argument")
+
+	// Start the gateway..
+	minio.StartGateway(ctx, &Manta{args.First()})
 }
 
 // Manta implements Gateway.
@@ -139,17 +142,22 @@ func (g *Manta) Name() string {
 // talk to manta remote backend.
 func (g *Manta) NewGatewayLayer(creds auth.Credentials) (minio.ObjectLayer, error) {
 	var err error
+	var secure bool
 	var signer authentication.Signer
 	var endpoint = defaultMantaURL
 	ctx := context.Background()
 
 	if g.host != "" {
-		endpoint, _, err = minio.ParseGatewayEndpoint(g.host)
+		endpoint, secure, err = minio.ParseGatewayEndpoint(g.host)
 		if err != nil {
 			return nil, err
 		}
+		if secure {
+			endpoint = "https://" + endpoint
+		} else {
+			endpoint = "http://" + endpoint
+		}
 	}
-
 	if overrideRoot, ok := os.LookupEnv("MANTA_ROOT"); ok {
 		mantaRoot = overrideRoot
 	}
@@ -497,6 +505,31 @@ func (t *tritonObjects) ListObjectsV2(ctx context.Context, bucket, prefix, conti
 	return result, nil
 }
 
+// GetObjectNInfo - returns object info and locked object ReadCloser
+func (t *tritonObjects) GetObjectNInfo(ctx context.Context, bucket, object string, rs *minio.HTTPRangeSpec, h http.Header, lockType minio.LockType, opts minio.ObjectOptions) (gr *minio.GetObjectReader, err error) {
+	var objInfo minio.ObjectInfo
+	objInfo, err = t.GetObjectInfo(ctx, bucket, object, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	var startOffset, length int64
+	startOffset, length, err = rs.GetOffsetLength(objInfo.Size)
+	if err != nil {
+		return nil, err
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		err := t.GetObject(ctx, bucket, object, startOffset, length, pw, objInfo.ETag, opts)
+		pw.CloseWithError(err)
+	}()
+	// Setup cleanup function to cause the above go-routine to
+	// exit in case of partial read
+	pipeCloser := func() { pr.Close() }
+	return minio.NewGetObjectReaderFromReader(pr, objInfo, pipeCloser), nil
+}
+
 // GetObject - Reads an object from Manta. Supports additional parameters like
 // offset and length which are synonymous with HTTP Range requests.
 //
@@ -504,7 +537,7 @@ func (t *tritonObjects) ListObjectsV2(ctx context.Context, bucket, prefix, conti
 // indicates the total length of the object.
 //
 // https://apidocs.joyent.com/manta/api.html#GetObject
-func (t *tritonObjects) GetObject(ctx context.Context, bucket, object string, startOffset int64, length int64, writer io.Writer, etag string) error {
+func (t *tritonObjects) GetObject(ctx context.Context, bucket, object string, startOffset int64, length int64, writer io.Writer, etag string, opts minio.ObjectOptions) error {
 	// Start offset cannot be negative.
 	if startOffset < 0 {
 		logger.LogIf(ctx, fmt.Errorf("Unexpected error"))
@@ -536,7 +569,7 @@ func (t *tritonObjects) GetObject(ctx context.Context, bucket, object string, st
 // uses Triton equivalent GetBlobProperties.
 //
 // https://apidocs.joyent.com/manta/api.html#GetObject
-func (t *tritonObjects) GetObjectInfo(ctx context.Context, bucket, object string) (objInfo minio.ObjectInfo, err error) {
+func (t *tritonObjects) GetObjectInfo(ctx context.Context, bucket, object string, opts minio.ObjectOptions) (objInfo minio.ObjectInfo, err error) {
 	info, err := t.client.Objects().GetInfo(ctx, &storage.GetInfoInput{
 		ObjectPath: path.Join(mantaRoot, bucket, object),
 	})
@@ -574,7 +607,8 @@ func (d dummySeeker) Seek(offset int64, whence int) (int64, error) {
 // CreateBlockBlobFromReader.
 //
 // https://apidocs.joyent.com/manta/api.html#PutObject
-func (t *tritonObjects) PutObject(ctx context.Context, bucket, object string, data *hash.Reader, metadata map[string]string) (objInfo minio.ObjectInfo, err error) {
+func (t *tritonObjects) PutObject(ctx context.Context, bucket, object string, r *minio.PutObjReader, metadata map[string]string, opts minio.ObjectOptions) (objInfo minio.ObjectInfo, err error) {
+	data := r.Reader
 	if err = t.client.Objects().Put(ctx, &storage.PutObjectInput{
 		ContentLength: uint64(data.Size()),
 		ObjectPath:    path.Join(mantaRoot, bucket, object),
@@ -593,14 +627,14 @@ func (t *tritonObjects) PutObject(ctx context.Context, bucket, object string, da
 		return objInfo, err
 	}
 
-	return t.GetObjectInfo(ctx, bucket, object)
+	return t.GetObjectInfo(ctx, bucket, object, opts)
 }
 
 // CopyObject - Copies a blob from source container to destination container.
 // Uses Manta Snaplinks API.
 //
 // https://apidocs.joyent.com/manta/api.html#PutSnapLink
-func (t *tritonObjects) CopyObject(ctx context.Context, srcBucket, srcObject, destBucket, destObject string, srcInfo minio.ObjectInfo) (objInfo minio.ObjectInfo, err error) {
+func (t *tritonObjects) CopyObject(ctx context.Context, srcBucket, srcObject, destBucket, destObject string, srcInfo minio.ObjectInfo, srcOpts, dstOpts minio.ObjectOptions) (objInfo minio.ObjectInfo, err error) {
 	if err = t.client.SnapLinks().Put(ctx, &storage.PutSnapLinkInput{
 		SourcePath: path.Join(mantaRoot, srcBucket, srcObject),
 		LinkPath:   path.Join(mantaRoot, destBucket, destObject),
@@ -609,7 +643,7 @@ func (t *tritonObjects) CopyObject(ctx context.Context, srcBucket, srcObject, de
 		return objInfo, err
 	}
 
-	return t.GetObjectInfo(ctx, destBucket, destObject)
+	return t.GetObjectInfo(ctx, destBucket, destObject, dstOpts)
 }
 
 // DeleteObject - Delete a blob in Manta, uses Triton equivalent DeleteBlob API.
@@ -624,4 +658,9 @@ func (t *tritonObjects) DeleteObject(ctx context.Context, bucket, object string)
 	}
 
 	return nil
+}
+
+// IsCompressionSupported returns whether compression is applicable for this layer.
+func (t *tritonObjects) IsCompressionSupported() bool {
+	return false
 }

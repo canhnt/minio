@@ -19,7 +19,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -28,21 +27,15 @@ import (
 )
 
 // Initialize cache FS objects.
-func initCacheFSObjects(disk string, cacheMaxUse int, t *testing.T) (*cacheFSObjects, error) {
-	newTestConfig(globalMinioDefaultRegion)
-	var err error
-	obj, err := newCacheFSObjects(disk, globalCacheExpiry, cacheMaxUse)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return obj, nil
+func initCacheFSObjects(disk string, cacheMaxUse int) (*cacheFSObjects, error) {
+	return newCacheFSObjects(disk, globalCacheExpiry, cacheMaxUse)
 }
 
 // inits diskCache struct for nDisks
 func initDiskCaches(drives []string, cacheMaxUse int, t *testing.T) (*diskCache, error) {
 	var cfs []*cacheFSObjects
 	for _, d := range drives {
-		obj, err := initCacheFSObjects(d, cacheMaxUse, t)
+		obj, err := initCacheFSObjects(d, cacheMaxUse)
 		if err != nil {
 			return nil, err
 		}
@@ -131,11 +124,6 @@ func TestGetCacheFSMaxUse(t *testing.T) {
 
 // test wildcard patterns for excluding entries from cache
 func TestCacheExclusion(t *testing.T) {
-	rootPath, err := newTestConfig(globalMinioDefaultRegion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(rootPath)
 	fsDirs, err := getRandomDisks(1)
 	if err != nil {
 		t.Fatal(err)
@@ -204,17 +192,18 @@ func TestDiskCache(t *testing.T) {
 	objInfo.ContentType = contentType
 	objInfo.ETag = etag
 	objInfo.UserDefined = httpMeta
+	opts := ObjectOptions{}
 
 	byteReader := bytes.NewReader([]byte(content))
-	hashReader, err := hash.NewReader(byteReader, int64(size), "", "")
+	hashReader, err := hash.NewReader(byteReader, int64(size), "", "", int64(size))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = cache.Put(ctx, bucketName, objectName, hashReader, httpMeta)
+	err = cache.Put(ctx, bucketName, objectName, NewPutObjReader(hashReader, nil, nil), httpMeta, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cachedObjInfo, err := cache.GetObjectInfo(ctx, bucketName, objectName)
+	cachedObjInfo, err := cache.GetObjectInfo(ctx, bucketName, objectName, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +220,7 @@ func TestDiskCache(t *testing.T) {
 		t.Fatal("Cached content-type does not match")
 	}
 	writer := bytes.NewBuffer(nil)
-	err = cache.Get(ctx, bucketName, objectName, 0, int64(size), writer, "")
+	err = cache.Get(ctx, bucketName, objectName, 0, int64(size), writer, "", opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,23 +267,24 @@ func TestDiskCacheMaxUse(t *testing.T) {
 	objInfo.ContentType = contentType
 	objInfo.ETag = etag
 	objInfo.UserDefined = httpMeta
+	opts := ObjectOptions{}
 
 	byteReader := bytes.NewReader([]byte(content))
-	hashReader, err := hash.NewReader(byteReader, int64(size), "", "")
+	hashReader, err := hash.NewReader(byteReader, int64(size), "", "", int64(size))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !cache.diskAvailable(int64(size)) {
-		err = cache.Put(ctx, bucketName, objectName, hashReader, httpMeta)
+		err = cache.Put(ctx, bucketName, objectName, NewPutObjReader(hashReader, nil, nil), httpMeta, opts)
 		if err != errDiskFull {
 			t.Fatal("Cache max-use limit violated.")
 		}
 	} else {
-		err = cache.Put(ctx, bucketName, objectName, hashReader, httpMeta)
+		err = cache.Put(ctx, bucketName, objectName, NewPutObjReader(hashReader, nil, nil), httpMeta, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
-		cachedObjInfo, err := cache.GetObjectInfo(ctx, bucketName, objectName)
+		cachedObjInfo, err := cache.GetObjectInfo(ctx, bucketName, objectName, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -311,7 +301,7 @@ func TestDiskCacheMaxUse(t *testing.T) {
 			t.Fatal("Cached content-type does not match")
 		}
 		writer := bytes.NewBuffer(nil)
-		err = cache.Get(ctx, bucketName, objectName, 0, int64(size), writer, "")
+		err = cache.Get(ctx, bucketName, objectName, 0, int64(size), writer, "", opts)
 		if err != nil {
 			t.Fatal(err)
 		}

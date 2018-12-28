@@ -19,13 +19,12 @@ package http
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"runtime"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,7 +117,7 @@ func getTLSConfig(t *testing.T) *tls.Config {
 	tlsConfig := &tls.Config{
 		PreferServerCipherSuites: true,
 		MinVersion:               tls.VersionTLS12,
-		NextProtos:               []string{"http/1.1", "h2"},
+		NextProtos:               []string{"http/1.1"},
 	}
 	tlsConfig.Certificates = append(tlsConfig.Certificates, tlsCert)
 
@@ -195,15 +194,6 @@ func TestIsHTTPMethod(t *testing.T) {
 }
 
 func TestNewHTTPListener(t *testing.T) {
-	errMsg := ": no such host"
-
-	remoteAddrErrMsg := "listen tcp 93.184.216.34:65432: bind: cannot assign requested address"
-	if runtime.GOOS == "windows" {
-		remoteAddrErrMsg = "listen tcp 93.184.216.34:65432: bind: The requested address is not valid in its context."
-	} else if runtime.GOOS == "darwin" {
-		remoteAddrErrMsg = "listen tcp 93.184.216.34:65432: bind: can't assign requested address"
-	}
-
 	tlsConfig := getTLSConfig(t)
 
 	testCases := []struct {
@@ -212,19 +202,18 @@ func TestNewHTTPListener(t *testing.T) {
 		tcpKeepAliveTimeout    time.Duration
 		readTimeout            time.Duration
 		writeTimeout           time.Duration
-		updateBytesReadFunc    func(int)
-		updateBytesWrittenFunc func(int)
-		errorLogFunc           func(context.Context, error)
-		expectedErr            error
+		updateBytesReadFunc    func(*http.Request, int)
+		updateBytesWrittenFunc func(*http.Request, int)
+		expectedErr            bool
 	}{
-		{[]string{"93.184.216.34:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, nil, errors.New(remoteAddrErrMsg)},
-		{[]string{"example.org:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, nil, errors.New(remoteAddrErrMsg)},
-		{[]string{"unknown-host"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, nil, errors.New("listen tcp: address unknown-host: missing port in address")},
-		{[]string{"unknown-host:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, nil, errors.New("listen tcp: lookup unknown-host" + errMsg)},
-		{[]string{"localhost:65432", "93.184.216.34:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, nil, errors.New(remoteAddrErrMsg)},
-		{[]string{"localhost:65432", "unknown-host:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, nil, errors.New("listen tcp: lookup unknown-host" + errMsg)},
-		{[]string{"localhost:0"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, nil, nil},
-		{[]string{"localhost:0"}, tlsConfig, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, nil, nil},
+		{[]string{"93.184.216.34:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, true},
+		{[]string{"example.org:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, true},
+		{[]string{"unknown-host"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, true},
+		{[]string{"unknown-host:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, true},
+		{[]string{"localhost:65432", "93.184.216.34:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, true},
+		{[]string{"localhost:65432", "unknown-host:65432"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, true},
+		{[]string{"localhost:0"}, nil, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, false},
+		{[]string{"localhost:0"}, tlsConfig, time.Duration(0), time.Duration(0), time.Duration(0), nil, nil, false},
 	}
 
 	for _, testCase := range testCases {
@@ -234,26 +223,17 @@ func TestNewHTTPListener(t *testing.T) {
 			testCase.tcpKeepAliveTimeout,
 			testCase.readTimeout,
 			testCase.writeTimeout,
+			DefaultMaxHeaderBytes,
 			testCase.updateBytesReadFunc,
 			testCase.updateBytesWrittenFunc,
 		)
 
-		if testCase.expectedErr == nil {
+		if !testCase.expectedErr {
 			if err != nil {
 				t.Fatalf("error: expected = <nil>, got = %v", err)
 			}
 		} else if err == nil {
 			t.Fatalf("error: expected = %v, got = <nil>", testCase.expectedErr)
-		} else {
-			var match bool
-			if strings.HasSuffix(testCase.expectedErr.Error(), errMsg) {
-				match = strings.HasSuffix(err.Error(), errMsg)
-			} else {
-				match = (testCase.expectedErr.Error() == err.Error())
-			}
-			if !match {
-				t.Fatalf("error: expected = %v, got = %v", testCase.expectedErr, err)
-			}
 		}
 
 		if err == nil {
@@ -285,6 +265,7 @@ func TestHTTPListenerStartClose(t *testing.T) {
 			time.Duration(0),
 			time.Duration(0),
 			time.Duration(0),
+			DefaultMaxHeaderBytes,
 			nil,
 			nil,
 		)
@@ -332,6 +313,7 @@ func TestHTTPListenerAddr(t *testing.T) {
 			time.Duration(0),
 			time.Duration(0),
 			time.Duration(0),
+			DefaultMaxHeaderBytes,
 			nil,
 			nil,
 		)
@@ -376,6 +358,7 @@ func TestHTTPListenerAddrs(t *testing.T) {
 			time.Duration(0),
 			time.Duration(0),
 			time.Duration(0),
+			DefaultMaxHeaderBytes,
 			nil,
 			nil,
 		)
@@ -402,17 +385,20 @@ func TestHTTPListenerAccept(t *testing.T) {
 	nonLoopBackIP := getNonLoopBackIP(t)
 
 	testCases := []struct {
-		serverAddrs []string
-		tlsConfig   *tls.Config
-		request     string
-		reply       string
+		serverAddrs         []string
+		tlsConfig           *tls.Config
+		request             string
+		reply               string
+		expectedRequestLine string
 	}{
-		{[]string{"localhost:0"}, nil, "GET / HTTP/1.0\n", "200 OK\n"},
-		{[]string{nonLoopBackIP + ":0"}, nil, "POST / HTTP/1.0\n", "200 OK\n"},
-		{[]string{"127.0.0.1:0", nonLoopBackIP + ":0"}, nil, "CONNECT \n", "200 OK\n"},
-		{[]string{"localhost:0"}, tlsConfig, "GET / HTTP/1.0\n", "200 OK\n"},
-		{[]string{nonLoopBackIP + ":0"}, tlsConfig, "POST / HTTP/1.0\n", "200 OK\n"},
-		{[]string{"127.0.0.1:0", nonLoopBackIP + ":0"}, tlsConfig, "CONNECT \n", "200 OK\n"},
+		{[]string{"localhost:0"}, nil, "GET / HTTP/1.0\r\nHost: example.org\r\n\r\n", "200 OK\r\n", "GET / HTTP/1.0\r\n"},
+		{[]string{nonLoopBackIP + ":0"}, nil, "POST / HTTP/1.0\r\nHost: example.org\r\n\r\n", "200 OK\r\n", "POST / HTTP/1.0\r\n"},
+		{[]string{nonLoopBackIP + ":0"}, nil, "HEAD / HTTP/1.0\r\nhost: example.org\r\n\r\n", "200 OK\r\n", "HEAD / HTTP/1.0\r\n"},
+		{[]string{"127.0.0.1:0", nonLoopBackIP + ":0"}, nil, "CONNECT / HTTP/1.0\r\nHost: www.example.org\r\n\r\n", "200 OK\r\n", "CONNECT / HTTP/1.0\r\n"},
+		{[]string{"localhost:0"}, tlsConfig, "GET / HTTP/1.0\r\nHost: example.org\r\n\r\n", "200 OK\r\n", "GET / HTTP/1.0\r\n"},
+		{[]string{nonLoopBackIP + ":0"}, tlsConfig, "POST / HTTP/1.0\r\nHost: example.org\r\n\r\n", "200 OK\r\n", "POST / HTTP/1.0\r\n"},
+		{[]string{nonLoopBackIP + ":0"}, tlsConfig, "HEAD / HTTP/1.0\r\nhost: example.org\r\n\r\n", "200 OK\r\n", "HEAD / HTTP/1.0\r\n"},
+		{[]string{"127.0.0.1:0", nonLoopBackIP + ":0"}, tlsConfig, "CONNECT / HTTP/1.0\r\nHost: www.example.org\r\n\r\n", "200 OK\r\n", "CONNECT / HTTP/1.0\r\n"},
 	}
 
 	for i, testCase := range testCases {
@@ -422,6 +408,7 @@ func TestHTTPListenerAccept(t *testing.T) {
 			time.Duration(0),
 			time.Duration(0),
 			time.Duration(0),
+			DefaultMaxHeaderBytes,
 			nil,
 			nil,
 		)
@@ -451,13 +438,13 @@ func TestHTTPListenerAccept(t *testing.T) {
 				t.Fatalf("Test %d: accept: expected = <nil>, got = %v", i+1, err)
 			}
 
-			request, err := bufio.NewReader(serverConn).ReadString('\n')
+			requestLine, err := bufio.NewReader(serverConn).ReadString('\n')
 			if err != nil {
 				t.Fatalf("Test %d: request read: expected = <nil>, got = %v", i+1, err)
 			}
 
-			if testCase.request != request {
-				t.Fatalf("Test %d: request: expected = %v, got = %v", i+1, testCase.request, request)
+			if requestLine != testCase.expectedRequestLine {
+				t.Fatalf("Test %d: request: expected = %v, got = %v", i+1, testCase.expectedRequestLine, requestLine)
 			}
 
 			if _, err = io.WriteString(serverConn, testCase.reply); err != nil {
@@ -501,6 +488,7 @@ func TestHTTPListenerAcceptPeekError(t *testing.T) {
 			time.Duration(0),
 			time.Duration(0),
 			time.Duration(0),
+			DefaultMaxHeaderBytes,
 			nil,
 			nil,
 		)
@@ -554,6 +542,7 @@ func TestHTTPListenerAcceptTLSError(t *testing.T) {
 			time.Duration(0),
 			time.Duration(0),
 			time.Duration(0),
+			DefaultMaxHeaderBytes,
 			nil,
 			nil,
 		)
@@ -620,6 +609,7 @@ func TestHTTPListenerAcceptError(t *testing.T) {
 			time.Duration(0),
 			time.Duration(0),
 			time.Duration(0),
+			DefaultMaxHeaderBytes,
 			nil,
 			nil,
 		)
@@ -654,11 +644,22 @@ func TestHTTPListenerAcceptError(t *testing.T) {
 				}
 			}()
 
-			_, err = bufio.NewReader(conn).ReadString('\n')
-			if err == nil {
-				t.Fatalf("Test %d: reply read: expected = EOF got = <nil>", i+1)
-			} else if err.Error() != "EOF" {
-				t.Fatalf("Test %d: reply read: expected = EOF got = %v", i+1, err)
+			if !testCase.secureClient && testCase.tlsConfig != nil {
+				buf := make([]byte, len(sslRequiredErrMsg))
+				var n int
+				n, err = io.ReadFull(conn, buf)
+				if err != nil {
+					t.Fatalf("Test %d: reply read: expected = <nil> got = %v", i+1, err)
+				} else if n != len(buf) {
+					t.Fatalf("Test %d: reply length: expected = %v got = %v", i+1, len(buf), n)
+				} else if !bytes.Equal(buf, sslRequiredErrMsg) {
+					t.Fatalf("Test %d: reply: expected = %v got = %v", i+1, string(sslRequiredErrMsg), string(buf))
+				}
+				continue
+			}
+
+			if _, err = bufio.NewReader(conn).ReadString('\n'); err != io.EOF {
+				t.Errorf("Test %d: reply read: expected = io.EOF, got = %s", i+1, err)
 			}
 
 			conn.Close()
@@ -745,6 +746,7 @@ func TestHTTPListenerAcceptParallel(t *testing.T) {
 			time.Duration(0),
 			time.Duration(0),
 			time.Duration(0),
+			DefaultMaxHeaderBytes,
 			nil,
 			nil,
 		)
@@ -753,8 +755,8 @@ func TestHTTPListenerAcceptParallel(t *testing.T) {
 		}
 
 		for _, serverAddr := range listener.Addrs() {
-			go connect(i, serverAddr.String(), testCase.tlsConfig != nil, true, "GET /1 HTTP/1.0\n", testCase.reply)
-			go connect(i, serverAddr.String(), testCase.tlsConfig != nil, false, "GET /2 HTTP/1.0\n", testCase.reply)
+			go connect(i, serverAddr.String(), testCase.tlsConfig != nil, true, "GET /1 HTTP/1.0\r\nHost: example.org\r\nr\n", testCase.reply)
+			go connect(i, serverAddr.String(), testCase.tlsConfig != nil, false, "GET /2 HTTP/1.0\r\nHost: example.org\r\n\r\n", testCase.reply)
 
 			var wg sync.WaitGroup
 
@@ -763,14 +765,14 @@ func TestHTTPListenerAcceptParallel(t *testing.T) {
 				t.Fatalf("Test %d: accept: expected = <nil>, got = %v", i+1, err)
 			}
 			wg.Add(1)
-			go handleConnection(i, &wg, serverConn, "GET /2 HTTP/1.0\n", testCase.reply)
+			go handleConnection(i, &wg, serverConn, "GET /2 HTTP/1.0\r\n", testCase.reply)
 
 			serverConn, err = listener.Accept()
 			if err != nil {
 				t.Fatalf("Test %d: accept: expected = <nil>, got = %v", i+1, err)
 			}
 			wg.Add(1)
-			go handleConnection(i, &wg, serverConn, "GET /1 HTTP/1.0\n", testCase.reply)
+			go handleConnection(i, &wg, serverConn, "GET /1 HTTP/1.0\r\n", testCase.reply)
 
 			wg.Wait()
 		}
@@ -801,11 +803,19 @@ func TestIgnoreErr(t *testing.T) {
 			want: true,
 		},
 		{
+			err:  errors.New("EOF"),
+			want: true,
+		},
+		{
 			err:  &net.OpError{Err: &myTimeoutErr{timeout: false}},
 			want: false,
 		},
 		{
 			err:  io.ErrUnexpectedEOF,
+			want: false,
+		},
+		{
+			err:  nil,
 			want: false,
 		},
 	}

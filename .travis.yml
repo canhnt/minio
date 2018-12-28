@@ -1,42 +1,46 @@
 go_import_path: github.com/minio/minio
-sudo: required
-
-services:
- - docker
-
-dist: trusty
 
 language: go
+
+# this ensures PRs based on a local branch are not built twice
+# the downside is that a PR targeting a different branch is not built
+# but as a workaround you can add the branch to this list
+branches:
+  only:
+    - master
 
 matrix:
   include:
     - os: linux
+      dist: trusty
+      sudo: required
       env:
         - ARCH=x86_64
-      go: 1.10.1
+      go: 1.10.4
       script:
         - make
         - diff -au <(gofmt -s -d cmd) <(printf "")
         - diff -au <(gofmt -s -d pkg) <(printf "")
         - make test GOFLAGS="-timeout 15m -race -v"
+        - make verify
         - make coverage
-        - node --version
         - cd browser && yarn && yarn test && cd ..
-    - os: linux-ppc64le
+    - os: windows
       env:
-        - ARCH=ppc64le
-      go: 1.10.1
+        - ARCH=x86_64
+      go: 1.10.4
       script:
-        - make
-        - diff -au <(gofmt -s -d cmd) <(printf "")
-        - diff -au <(gofmt -s -d pkg) <(printf "")
-        - make test GOFLAGS="-timeout 15m -v"
-        - make coverage
-        - node --version
-        - cd browser && yarn && yarn test && cd ..
+        - go build --ldflags="$(go run buildscripts/gen-ldflags.go)" -o %GOPATH%\bin\minio.exe
+        - for d in $(go list ./... | grep -v browser); do go test -v -race --timeout 20m "$d"; done
+        - bash buildscripts/go-coverage.sh
+
+before_script:
+  # Add an IPv6 config - see the corresponding Travis issue
+  # https://github.com/travis-ci/travis-ci/issues/8361
+  - if [[ "${TRAVIS_OS_NAME}" == "linux" ]]; then sudo sh -c 'echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6'; fi
 
 before_install:
-- nvm install stable
+ - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then nvm install stable ; fi
 
 after_success:
 - bash <(curl -s https://codecov.io/bash)
